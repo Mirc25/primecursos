@@ -1,0 +1,8 @@
+﻿# Ignore runtime and local dev artifacts
+*.log
+*.tmp
+passwords.txt
+properties.ini
+xampp-control.ini
+tmp_deploy/
+public_html-backup*
