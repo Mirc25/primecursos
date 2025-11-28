@@ -1,0 +1,15 @@
+<?php
+// prime-cursos-config.php.template
+// TEMPLATE: place a copy (with secrets filled) outside the webroot on the server.
+// Do NOT commit the filled file to version control.
+
+return [
+    'PRIME_DATA_DIR' => getenv('PRIME_DATA_DIR') ?: '/home/youruser/prime-cursos-data',
+    'PAYPAL_ENV'     => getenv('PAYPAL_ENV') ?: 'sandbox',
+    'PAYPAL_CLIENT'  => getenv('PAYPAL_CLIENT') ?: null,
+    'PAYPAL_SECRET'  => getenv('PAYPAL_SECRET') ?: null,
+    // Mercado Pago (sandbox) - set these for Mercado Pago integration
+    'MERCADOPAGO_COUNTRY' => getenv('MERCADOPAGO_COUNTRY') ?: 'AR',
+    'MERCADOPAGO_PUBLIC_KEY' => getenv('MERCADOPAGO_PUBLIC_KEY') ?: null,
+    'MERCADOPAGO_ACCESS_TOKEN' => getenv('MERCADOPAGO_ACCESS_TOKEN') ?: null,
+];

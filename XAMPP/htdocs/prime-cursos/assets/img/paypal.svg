@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#005ea6"/><stop offset="1" stop-color="#003087"/></linearGradient>
+  </defs>
+  <rect width="200" height="60" rx="8" fill="none"/>
+  <g transform="translate(8,6)">
+    <rect width="96" height="48" rx="6" fill="url(#g)"/>
+    <text x="18" y="32" fill="#fff" font-family="Arial,Helvetica,sans-serif" font-size="20" font-weight="800">PayPal</text>
+  </g>
+</svg>

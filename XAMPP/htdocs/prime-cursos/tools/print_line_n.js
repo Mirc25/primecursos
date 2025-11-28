@@ -1,0 +1,1 @@
+const fs=require('fs');const path=require('path');const p=path.resolve(__dirname,'..','admin.html');const s=fs.readFileSync(p,'utf8');const m=s.match(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/i);const code=(m?m[1]:'');const lines=code.split('\n');const n=256;console.log('S:'+n+' | '+(lines[n-1]||'<<empty>>'));

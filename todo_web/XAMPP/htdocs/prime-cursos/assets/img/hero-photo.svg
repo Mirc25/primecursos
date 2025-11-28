@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Stylized portrait placeholder to use as hero photo background -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#2b254a"/>
+    </linearGradient>
+    <linearGradient id="grad" x1="0" x2="1">
+      <stop offset="0" stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#5b21b6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="100%" height="100%" fill="url(#bg)" />
+
+  <!-- soft light circles for depth -->
+  <circle cx="1200" cy="200" r="260" fill="rgba(124,58,237,0.12)" />
+  <circle cx="1350" cy="350" r="180" fill="rgba(255,255,255,0.03)" />
+
+  <!-- stylized person silhouette (vector, neutral) -->
+  <g transform="translate(220,130) scale(1.2)">
+    <!-- body card (simulating clothing) -->
+    <rect x="520" y="200" rx="28" ry="28" width="380" height="420" fill="url(#grad)" opacity="0.95" />
+    <!-- head -->
+    <circle cx="700" cy="140" r="78" fill="#f5e9ff" />
+    <!-- hair shape -->
+    <path d="M650 110 C640 80, 760 80, 740 110 C780 110, 780 170, 720 170 C700 170, 660 150, 650 130 Z" fill="#3b2b6b"/>
+    <!-- face features (minimal) -->
+    <ellipse cx="685" cy="142" rx="6" ry="8" fill="#2b254a" />
+    <ellipse cx="715" cy="142" rx="6" ry="8" fill="#2b254a" />
+    <path d="M690 158 Q700 170 710 158" stroke="#2b254a" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <!-- subtle clothing detail -->
+    <rect x="720" y="240" width="120" height="12" rx="6" fill="rgba(255,255,255,0.12)" />
+  </g>
+
+  <!-- foreground cards to emulate course thumbnails -->
+  <g transform="translate(60,480)">
+    <rect x="40" y="0" rx="12" ry="12" width="500" height="220" fill="rgba(255,255,255,0.03)" />
+    <rect x="580" y="20" rx="12" ry="12" width="360" height="170" fill="rgba(255,255,255,0.04)" />
+  </g>
+
+</svg>

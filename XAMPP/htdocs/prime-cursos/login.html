@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Registro — Prime Cursos</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <style>
+    .auth-wrap{max-width:760px;margin:28px auto;padding:18px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:12px}
+    .auth-grid{display:flex;gap:18px}
+    .auth-col{flex:1;padding:12px}
+    .auth-col h3{margin-top:0;color:#fff}
+    .form-row{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+    input[type="text"],input[type="email"],input[type="password"]{padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:#fff}
+    .btn{background:var(--accent);color:#fff;padding:10px 14px;border-radius:8px;border:0;cursor:pointer}
+    .google-btn{background:#fff;color:#222;padding:8px 12px;border-radius:6px;border:0;cursor:pointer}
+    .muted{color:#cbd5e1;font-size:0.95rem}
+  </style>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container"><h1 class="logo">Prime <span>Cursos</span></h1></div>
+  </header>
+
+  <main class="container">
+    <section class="auth-wrap">
+      <div class="auth-grid">
+        <div class="auth-col" id="emailCol">
+          <h3>Registro por email</h3>
+          <div class="form-row"><label class="muted">Nombre</label><input id="name" type="text" placeholder="Tu nombre"></div>
+          <div class="form-row"><label class="muted">Email</label><input id="email" type="email" placeholder="tu@correo.com"></div>
+          <div class="form-row"><label class="muted">Contraseña</label><input id="password" type="password" placeholder="Contraseña segura"></div>
+          <div style="display:flex;gap:8px;align-items:center"><button id="emailRegister" class="btn">Crear cuenta</button><div id="emailMsg" style="color:#fff;margin-left:8px"></div></div>
+        </div>
+        <div class="auth-col" id="googleCol">
+          <h3>Registrarse con Google</h3>
+          <p class="muted">Usa tu cuenta de Google para registrarte rápidamente.</p>
+          <div id="g_id_onload"
+               data-client_id="YOUR_GOOGLE_CLIENT_ID"
+               data-callback="handleCredentialResponse"
+               data-auto_prompt="false">
+          </div>
+          <div class="g_id_signin" data-type="standard" data-size="large"></div>
+          <p class="muted">Al registrarte aceptas nuestras condiciones.</p>
+          <div id="googleMsg" style="color:#fff"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    function showMessage(el, text, ok){ el.textContent = text; el.style.color = ok? '#bbf7d0':'#ffd2d2'; }
+
+    document.getElementById('emailRegister').addEventListener('click', function(){
+      var name = document.getElementById('name').value.trim();
+      var email = document.getElementById('email').value.trim();
+      var pass = document.getElementById('password').value;
+      if(!email || !pass){ showMessage(document.getElementById('emailMsg'),'Email y contraseña requeridos',false); return; }
+      fetch('register.php',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ type:'email', name:name, email:email, password:pass })
+      }).then(r=>r.json()).then(function(j){ if(j && j.ok){ showMessage(document.getElementById('emailMsg'),'Cuenta creada. Revisa tu email.',true); setTimeout(function(){ window.location.href='index.html'; },1200); } else { showMessage(document.getElementById('emailMsg'),j.error||'Error',false); } }).catch(function(e){ showMessage(document.getElementById('emailMsg'),'Error servidor',false); });
+    });
+
+    // Google credential callback (global function for Google's client)
+    function handleCredentialResponse(response){
+      if(!response || !response.credential) return;
+      // send id_token to server for verification and registration
+      fetch('register.php',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ type:'google', id_token: response.credential })
+      }).then(r=>r.json()).then(function(j){ if(j && j.ok){ showMessage(document.getElementById('googleMsg'),'Registrado con éxito',true); setTimeout(function(){ window.location.href='index.html'; },1000); } else { showMessage(document.getElementById('googleMsg'),j.error||'Error',false); } }).catch(function(e){ showMessage(document.getElementById('googleMsg'),'Error servidor',false); });
+    }
+  </script>
+</body>
+</html>

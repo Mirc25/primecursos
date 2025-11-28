@@ -1,0 +1,149 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Vista previa del Diploma</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Montserrat:wght@300;600&display=swap');
+    body{font-family:Montserrat, system-ui, Arial, sans-serif; background:linear-gradient(180deg,#eef4f9 0%, #f9fbfd 100%); color:#062033; padding:30px}
+    .paper{max-width:920px;margin:0 auto;background:linear-gradient(180deg,#ffffff 0%, #fbfdff 100%);padding:44px;border-radius:12px;border:1px solid rgba(6,32,51,0.06);box-shadow:0 8px 30px rgba(11,37,68,0.06);position:relative}
+    .frame{border:6px solid #f1f6fb;padding:20px;border-radius:8px}
+    .title{font-family:'Playfair Display', Georgia, serif;font-size:34px;margin:0 0 6px 0;text-align:center;color:#0b2740}
+    .subtitle{font-size:14px;color:#6b7280;text-align:center;margin:0 0 18px}
+    .recipient{font-family:'Playfair Display', serif;font-size:26px;text-align:center;margin:8px 0;color:#0b2740}
+    .award{font-size:16px;text-align:center;margin-top:12px;color:#334155}
+    .meta{display:flex;justify-content:space-between;align-items:center;margin-top:24px}
+    .meta .left{flex:1}
+    .qr{width:140px;height:140px;border-radius:8px;border:1px solid #e6eef8;padding:6px;background:#fff}
+    .print-btn{display:inline-block;padding:8px 12px;border-radius:8px;background:#0b79d0;color:#fff;text-decoration:none}
+    .center{text-align:center}
+    .muted{color:#6b7280}
+    .watermark{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);opacity:0.06;font-size:80px;font-family:'Playfair Display', serif;color:#0b2740}
+    .signature{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+    .sig-title{font-size:12px;color:#6b7280}
+    .sig-name{font-family:'Brush Script MT', cursive, 'Playfair Display', serif;font-size:20px;color:#10283a}
+  </style>
+</head>
+<body>
+  <div class="paper" id="paper">
+    <div class="watermark">Prime Cursos</div>
+    <div class="frame">
+      <!-- Golden stamp (inline SVG for reliable print and consistent look) -->
+      <div id="goldStamp" style="position:absolute;right:28px;top:28px;width:120px;height:120px;border-radius:999px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,0.12);">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="120" height="120" aria-hidden="true">
+          <defs>
+            <radialGradient id="g2" cx="50%" cy="35%" r="65%">
+              <stop offset="0%" stop-color="#fff7d6"/>
+              <stop offset="40%" stop-color="#ffd966"/>
+              <stop offset="100%" stop-color="#c18b00"/>
+            </radialGradient>
+            <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.12"/>
+            </filter>
+          </defs>
+          <g filter="url(#sh)">
+            <circle cx="100" cy="100" r="90" fill="url(#g2)" stroke="rgba(255,230,160,0.9)" stroke-width="3"/>
+            <circle cx="100" cy="100" r="70" fill="none" stroke="#f6d365" stroke-width="6"/>
+          </g>
+          <text x="50%" y="54%" font-size="22" font-family="Georgia, serif" font-weight="700" fill="#3b2b00" text-anchor="middle">PRIME</text>
+          <text x="50%" y="76%" font-size="12" font-family="Georgia, serif" fill="#3b2b00" text-anchor="middle">CURSOS</text>
+        </svg>
+      </div>
+    <h1 class="title">Certificado de Finalización</h1>
+    <div class="subtitle">Otorgado por Prime Cursos</div>
+    <div class="big">A</div>
+    <h2 id="studentName" style="text-align:center;margin:6px 0 0 0;">Alumno Ejemplo</h2>
+    <div class="muted center" id="studentSub">Por completar el curso</div>
+
+    <div style="margin-top:24px;text-align:center">
+      <div id="courseTitle" style="font-size:18px;font-weight:600">Curso de ejemplo</div>
+      <div class="muted" id="issuedAt">Emitido: --</div>
+    </div>
+
+    <div class="meta">
+      <div class="left muted">Firma: <strong>Prime Cursos</strong></div>
+      <div class="right center" style="display:flex;flex-direction:column;align-items:center;gap:6px">
+        <img id="qrImg" class="qr" src="" alt="QR">
+        <div style="margin-top:4px"><a id="verifyLink" href="#" target="_blank"></a></div>
+      </div>
+    </div>
+
+    <div style="text-align:right;margin-top:18px"><a href="#" id="printBtn" class="print-btn">Imprimir</a></div>
+    <div style="margin-top:22px;display:flex;justify-content:flex-end;align-items:center;gap:12px">
+      <!-- US flag small -->
+      <div style="width:48px;height:32px;border-radius:4px;overflow:hidden;border:1px solid rgba(0,0,0,0.08);">
+        <svg viewBox="0 0 19 13" width="48" height="32" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+          <rect width="19" height="13" fill="#b22234"/>
+          <g fill="#fff">
+            <rect y="1" width="19" height="1"/>
+            <rect y="3" width="19" height="1"/>
+            <rect y="5" width="19" height="1"/>
+            <rect y="7" width="19" height="1"/>
+            <rect y="9" width="19" height="1"/>
+            <rect y="11" width="19" height="1"/>
+          </g>
+          <rect width="8" height="6" fill="#3c3b6e"/>
+          <g fill="#fff" transform="translate(0.5,0.5) scale(0.6)">
+            <circle cx="1" cy="1" r="0.5"/>
+            <circle cx="3" cy="1" r="0.5"/>
+            <circle cx="5" cy="1" r="0.5"/>
+            <circle cx="2" cy="2" r="0.5"/>
+            <circle cx="4" cy="2" r="0.5"/>
+          </g>
+        </svg>
+      </div>
+      <div class="signature">
+        <div class="sig-title">TEC. SUPERVISOR Y EXPERTO EN PRIME CURSOS</div>
+        <!-- Inline SVG signature for nicer printed output; text fallback remains below -->
+        <div style="display:flex;flex-direction:column;align-items:flex-end;">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 160" width="220" height="60" aria-hidden="true">
+            <text x="10" y="110" font-family="Brush Script MT, Pacifico, Great Vibes, cursive, Georgia" font-size="72" fill="#0b2433">Pablo O. Oviedo</text>
+          </svg>
+          <div class="sig-name" style="font-family:Georgia, serif;font-size:12px;color:#062033;margin-top:4px">PABLO O. OVIEDO</div>
+        </div>
+      </div>
+    </div>
+    </div>
+  </div>
+(script src marker)
+<script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
+<script>
+(function(){
+  // parse query params
+  function qs(){ var s = (location.search||'').replace(/^\?/,''); if(!s) return {}; return s.split('&').reduce(function(acc,p){ if(!p) return acc; var kv = p.split('='); acc[decodeURIComponent(kv[0])] = kv[1] ? decodeURIComponent(kv[1].replace(/\+/g,' ')) : ''; return acc; }, {}); }
+  var p = qs();
+  var student = p.student || p.nombre || 'Nombre Apellido';
+  var title = p.title || p.curso || 'Título del curso';
+  var token = p.token || p.t || 'TOKEN-DE-EJEMPLO-1234';
+  var issued = p.issued || new Date().toLocaleDateString();
+
+  document.getElementById('studentName').textContent = student;
+  document.getElementById('courseTitle').textContent = title;
+  document.getElementById('issuedAt').textContent = 'Emitido: ' + issued;
+
+  // Build verification URL for the QR (points to the validator)
+  var origin = (location.origin || (location.protocol + '//' + location.host));
+  var verifyUrl = origin + '/prime-cursos/validate_cert.html?token=' + encodeURIComponent(token);
+  // Also build a friendly permalink (this page itself is the friendly certificate view)
+  var selfUrl = origin + '/prime-cursos/certificate_sample.html?token=' + encodeURIComponent(token) + '&student=' + encodeURIComponent(student) + '&title=' + encodeURIComponent(title) + '&issued=' + encodeURIComponent(issued);
+  var qr = document.getElementById('qrImg');
+  var link = document.getElementById('verifyLink'); link.href = verifyUrl; link.textContent = verifyUrl;
+  // Generate QR as data URL using QRious (better reliability than external image)
+  try{
+    if(window.QRious){
+      var q = new QRious({value: verifyUrl, size: 300});
+      qr.src = q.toDataURL();
+    } else {
+      throw new Error('QRious not available');
+    }
+  }catch(e){
+    // fallback to Google Charts (may be blocked in some environments)
+    qr.src = 'https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=' + encodeURIComponent(verifyUrl);
+  }
+
+  document.getElementById('printBtn').addEventListener('click', function(e){ e.preventDefault(); window.print(); });
+})();
+</script>
+</body>
+</html>

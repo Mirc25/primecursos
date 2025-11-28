@@ -1,0 +1,1172 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Prime Cursos — Admin (fixed2)</title>
+  <style>
+    :root{--bg:#0f1720;--panel:#071224;--muted:#89a0b3;--accent:#0b79d0}
+    body{margin:0;font-family:Inter,system-ui,Segoe UI,Arial;background:var(--bg);color:#e6eef8}
+    .wrap{max-width:960px;margin:18px auto;padding:18px}
+    .card{background:rgba(255,255,255,0.02);padding:12px;border-radius:8px;margin-bottom:12px}
+    textarea,input,button{font:inherit}
+    textarea,input{width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    .btn{display:inline-block;padding:8px 12px;border-radius:8px;border:0;background:var(--accent);color:#fff}
+    .muted{color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <h1 style="margin:0">Prime <strong>Cursos</strong> — Admin (fixed2)</h1>
+      <button id="myCoursesBtn" class="btn" style="margin-left:8px;background:#6b6fef">Mis cursos</button>
+    </div>
+
+    <section class="card">
+      <h3>Importar curso (texto plano)</h3>
+      <p class="muted">Pega el texto plano. Marca la opción correcta con <code>*</code>.</p>
+      <textarea id="raw" rows="8" placeholder="Pega el texto del curso aquí"></textarea>
+      <p class="muted" style="margin-top:8px">O pega aquí un objeto JSON del curso (estructura completa).</p>
+      <textarea id="rawJson" rows="8" placeholder='Pega aquí JSON del curso (ej: {"title":"...","modules":[...]})'></textarea>
+      <div style="margin-top:8px">
+        <button id="preview" class="btn">Previsualizar</button>
+        <button id="import" class="btn" style="background:#0ca87b;margin-left:8px">Importar</button>
+        <button id="importJson" class="btn" style="background:#0b6fa0;margin-left:8px">Importar JSON</button>
+      </div>
+      <div id="previewArea" style="display:none;margin-top:12px"></div>
+    </section>
+
+    <section class="card">
+      <h3>Cursos (localStorage)</h3>
+      <div style="margin-bottom:8px">
+        <button id="cleanupBtn" class="btn" style="background:#d08b2b">Limpiar duplicados y reparar</button>
+      </div>
+      <div id="list"></div>
+    </section>
+  </div>
+
+  <script>
+  (function(){
+    var storageKey = 'prime_courses';
+    var courses = [];
+    var selectedCourseId = null; // id of course selected in list for the single "Ver alumno" button
+
+    // Add a small CSS rule to isolate preview images from site-wide rules
+    try{
+      var pcCss = document.createElement('style');
+        pcCss.textContent = '.pc-preview-img{object-fit:contain!important;display:block!important;max-width:180px!important;max-height:140px!important;width:auto!important;height:auto!important;border-radius:6px!important;background:transparent!important;}';
+      document.head.appendChild(pcCss);
+    }catch(e){}
+
+    function uid(){ return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,9); }
+
+    function load(){
+      try{
+        var s = localStorage.getItem(storageKey);
+        courses = s ? JSON.parse(s) : [];
+      }catch(e){ courses = []; }
+      // dedupe courses by id or by title+price to avoid accidental duplicates
+      var seen = {};
+      var deduped = [];
+      courses.forEach(function(c){
+        var key = c.id ? String(c.id) : (String(c.title||'')+'|'+String(c.price||0));
+        if(!seen[key]){ seen[key]=true; deduped.push(c); }
+      });
+      courses = deduped;
+      // persist deduped list to avoid repeated duplicates in storage
+      try{ localStorage.setItem(storageKey, JSON.stringify(courses)); }catch(e){}
+      renderList();
+    }
+
+    function save(){ try{ localStorage.setItem(storageKey, JSON.stringify(courses)); }catch(e){} }
+
+    // Broadcast update to other tabs/windows so the storefront reloads immediately
+    function broadcastUpdate(){
+      try{
+        if(typeof BroadcastChannel !== 'undefined'){
+          var bc = new BroadcastChannel('prime_courses_channel');
+          try{ bc.postMessage({ type: 'updated', ts: Date.now() }); }catch(e){}
+          try{ bc.close(); }catch(e){}
+        } else {
+          // Fallback: write a small timestamp flag to localStorage to trigger storage events
+          try{ localStorage.setItem('__prime_courses_update_ts', String(Date.now())); }catch(e){}
+        }
+      }catch(e){}
+    }
+
+    function parseCoursePlain(text){
+      var lines = String(text||'').split(/\r?\n/).map(l=>l.trim());
+      var course = { id: uid(), title:'', category:'', short_description:'', description:'', price:0, image:null, modules:[], evaluation:[] };
+      var curMod = null, curSub = null, mode = '';
+      for(var i=0;i<lines.length;i++){
+        var L = lines[i];
+        if(!L) continue;
+        // detect inline question with options in the same line, e.g.
+        // "¿Cuál...? A) opt1 B) opt2 C) opt3 * D) opt4"
+        if(/A\)/i.test(L) && /B\)/i.test(L)){
+          try{
+            var aIdx = L.search(/A\)/i);
+            var qtxt = (aIdx>=0) ? L.slice(0,aIdx).trim() : '';
+            var rest = (aIdx>=0) ? L.slice(aIdx) : L;
+            var opts = [];
+            var ans = null;
+            var re = /([A-D])\)\s*([^A-D]*)/ig;
+            var m;
+            while((m = re.exec(rest)) !== null){
+              var key = (m[1]||'').toUpperCase();
+              var txt = (m[2]||'').trim();
+              if(/\*/.test(txt)){ txt = txt.replace(/\*/g,'').trim(); ans = key; }
+              opts.push({ key: key, text: txt });
+            }
+            if(qtxt){ var target = curMod || course; target.evaluation = target.evaluation || []; target.evaluation.push({ question: qtxt, options: opts, answer: ans }); continue; }
+          }catch(e){}
+        }
+        if(/^TITULO:\s*/i.test(L)){ course.title = L.replace(/^TITULO:\s*/i,'').trim(); continue; }
+        if(/^CATEGORIA:\s*/i.test(L)){ course.category = L.replace(/^CATEGORIA:\s*/i,'').trim(); continue; }
+        if(/^DESCRIPCION_CORTA:\s*/i.test(L)){ course.short_description = L.replace(/^DESCRIPCION_CORTA:\s*/i,'').trim(); continue; }
+        if(/^DESCRIPCION:\s*/i.test(L)){ course.description += (course.description ? '\n' : '') + L.replace(/^DESCRIPCION:\s*/i,'').trim(); mode = 'description'; continue; }
+        if(/^PRECIO:\s*/i.test(L)){ course.price = parseFloat(L.replace(/^PRECIO:\s*/i,'').replace(',','.'))||0; continue; }
+        var m = L.match(/^MODULO:\s*(?:[0-9\.]+)?\s*-?\s*(.*)$/i);
+        if(m){ curMod = { title:(m[1]||'Módulo'), submodules:[], evaluation:[] }; course.modules.push(curMod); curSub = null; mode = 'modules'; continue; }
+        var s = L.match(/^SUBMODULO:\s*(?:[0-9\.]+)?\s*-?\s*(.*)$/i);
+        if(s){ curSub = { title:(s[1]||'Sub'), content:'', image:null }; if(!curMod){ curMod = { title:'Módulo 1', submodules:[], evaluation:[] }; course.modules.push(curMod); } curMod.submodules.push(curSub); mode='sub'; continue; }
+        if(/^IMAGEN:\s*/i.test(L)){ var u = L.replace(/^IMAGEN:\s*/i,'').trim(); if(curSub) { curSub.image = u; } else { course.image = u; } continue; }
+        if(/^CONTENIDO:\s*/i.test(L)){ var v = L.replace(/^CONTENIDO:\s*/i,'').trim(); if(curSub) curSub.content += (curSub.content ? '\n' : '') + v; else course.description += (course.description ? '\n' : '') + v; continue; }
+        if(/^\+EVALUACION\+/i.test(L) || /^EVALUACION/i.test(L)){ mode='eval'; continue; }
+        if(mode==='eval' && /^P:\s*/i.test(L)){
+          var q = L.replace(/^P:\s*/i,'').trim(); var opts = [], ans = null; var j = i+1;
+          for(; j<lines.length; j++){
+            var nx = lines[j]; if(!nx) break;
+            var mo = nx.match(/^([A-D])[\)\:]\s*(.*)$/i); if(!mo) break;
+            var key = mo[1], txt = mo[2]||'';
+            if(/\*/.test(txt)){ txt = txt.replace(/\*/g,'').trim(); ans = key; }
+            opts.push({ key:key, text: txt });
+          }
+          // If inside a module, attach evaluation to the current module, otherwise to course.evaluation
+          var target = curMod || course;
+          target.evaluation = target.evaluation || [];
+          target.evaluation.push({ question: q, options: opts, answer: ans });
+          i = j-1; continue;
+        }
+        if(mode==='description') course.description += (course.description ? '\n' : '') + L;
+        else if(mode==='sub' && curSub) curSub.content += (curSub.content ? '\n' : '') + L;
+      }
+      if(!course.short_description && course.description) course.short_description = course.description.split('\n').join(' ').slice(0,160);
+      return course;
+    }
+
+    function escapeHtml(s){
+      return String(s||'').replace(/[&<>\"]/g, function(m){
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[m];
+      });
+    }
+
+    function renderList(){
+      var el = document.getElementById('list'); if(!el) return;
+      el.innerHTML = '';
+      if(!courses.length){ var msg = document.createElement('div'); msg.className='muted'; msg.textContent='No hay cursos importados'; el.appendChild(msg); return; }
+
+      // helper to read persisted progress for a course
+      function getProgressPct(courseId){ try{ var obj = JSON.parse(localStorage.getItem('prime_courses_progress')||'{}'); var s = obj[String(courseId)] || { passed: [] }; var passed = s.passed || []; var count = passed.filter(Boolean).length; var total = 0; var c = courses.find(function(x){ return String(x.id) === String(courseId); }); if(c && Array.isArray(c.modules)) total = c.modules.length; return total? Math.round((count/total)*100):0; }catch(e){ return 0; } }
+
+      // toolbar with single 'Ver alumno' button
+      var toolbar = document.createElement('div'); toolbar.style.display='flex'; toolbar.style.alignItems='center'; toolbar.style.gap='8px'; toolbar.style.marginBottom='8px';
+      var gv = document.createElement('button'); gv.className='btn'; gv.textContent = 'Ver alumno';
+      gv.addEventListener('click', function(){
+        if(!courses.length) return alert('No hay cursos para ver');
+        var id = selectedCourseId || (courses[0] && courses[0].id);
+        var found = courses.find(function(x){ return String(x.id) === String(id); });
+        if(!found) return alert('Selecciona un curso de la lista primero');
+        openStudentView(found);
+      });
+      toolbar.appendChild(gv);
+      var info = document.createElement('span'); info.className='muted'; info.textContent='Selecciona un curso y pulsa "Ver alumno" para ver su progreso'; toolbar.appendChild(info);
+      el.appendChild(toolbar);
+
+      // ensure there is a selectedCourseId
+      if(!selectedCourseId && courses.length) selectedCourseId = courses[0].id;
+
+      courses.forEach(function(c){
+        var row = document.createElement('div');
+        row.style.padding = '8px'; row.style.borderBottom = '1px solid rgba(255,255,255,0.02)'; row.style.display='flex'; row.style.flexDirection='column'; row.style.gap='6px';
+        var top = document.createElement('div'); top.style.display='flex'; top.style.alignItems='center'; top.style.gap='12px';
+          // cover thumbnail (if present)
+          if(c.image){ var thumb = document.createElement('img'); thumb.src = c.image; thumb.style.width='72px'; thumb.style.height='48px'; thumb.style.objectFit='cover'; thumb.style.borderRadius='6px'; thumb.style.marginRight='8px'; top.appendChild(thumb); }
+          var radio = document.createElement('input'); radio.type='radio'; radio.name='courseSelect'; radio.value = c.id; radio.id = 'course_' + String(c.id);
+          radio.checked = String(selectedCourseId) === String(c.id);
+          radio.addEventListener('change', function(){ selectedCourseId = c.id; renderList(); });
+          var strong = document.createElement('strong'); strong.textContent = (c.title && String(c.title).length>0) ? (String(c.title).length>80 ? String(c.title).slice(0,80)+'…' : c.title) : (c.short_description ? (c.short_description.length>80?c.short_description.slice(0,80)+'…':c.short_description) : '(sin título)');
+          var lab = document.createElement('label'); lab.htmlFor = radio.id; lab.style.cursor = 'pointer'; lab.appendChild(strong);
+          top.appendChild(radio);
+          top.appendChild(lab);
+        // Edit button to load this course into the preview for editing
+        var editBtn = document.createElement('button'); editBtn.className='btn'; editBtn.textContent = 'Editar'; editBtn.style.marginLeft = 'auto'; editBtn.style.background = '#0ca87b';
+        editBtn.addEventListener('click', function(evt){ evt.stopPropagation(); selectedCourseId = c.id; renderPreview(JSON.parse(JSON.stringify(c))); });
+        top.appendChild(editBtn);
+        // Delete button
+        var delBtn = document.createElement('button'); delBtn.className = 'btn'; delBtn.textContent = 'Eliminar'; delBtn.style.marginLeft = '8px'; delBtn.style.background = '#b03b3b';
+        delBtn.addEventListener('click', function(evt){
+          try{ evt.stopPropagation(); }catch(e){}
+          if(!confirm('Eliminar curso "'+(c.title||'')+'"? Esta acción borrará el curso localmente y en el servidor.')) return;
+          // Remove locally
+          try{ courses = courses.filter(function(x){ return String(x.id) !== String(c.id); }); localStorage.setItem(storageKey, JSON.stringify(courses)); }catch(e){ console.warn('Error removing course locally', e); }
+          try{ broadcastUpdate(); }catch(e){}
+          renderList();
+          // Attempt server-side deletion (best-effort)
+          try{
+            fetch('/prime-cursos/delete_course.php', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: c.id })
+            }).then(function(res){ return res.json().catch(function(){ return null; }); }).then(function(json){ if(!json || !json.success) console.warn('delete_course.php failed', json); }).catch(function(err){ console.warn('delete_course error', err); });
+          }catch(e){ console.warn('delete_course fetch error', e); }
+        });
+        top.appendChild(delBtn);
+        top.appendChild(lab);
+        // progress percent for this course (reads localStorage)
+        var pct = getProgressPct(c.id);
+        if(typeof pct === 'number'){
+          var progLine = document.createElement('div'); progLine.className='muted'; progLine.textContent = 'Progreso: '+pct+'%'; progLine.style.marginLeft='8px'; top.appendChild(progLine);
+        }
+        row.appendChild(top);
+        var catLine = document.createElement('div'); catLine.className='muted'; catLine.textContent = c.category || '';
+        row.appendChild(catLine);
+        if(String(selectedCourseId) === String(c.id)) row.style.background = 'rgba(255,255,255,0.015)';
+        el.appendChild(row);
+      });
+    }
+
+    var previewBtn = document.getElementById('preview');
+    if(previewBtn) previewBtn.addEventListener('click', function(){ var raw = (document.getElementById('raw')||{value:''}).value||''; if(!raw.trim()){ alert('Pega texto'); return; } var parsed = parseCoursePlain(raw); renderPreview(parsed); });
+
+    // 'Mis cursos' quick button: load stored courses and scroll to list
+    var myCoursesBtn = document.getElementById('myCoursesBtn');
+    if(myCoursesBtn){ myCoursesBtn.addEventListener('click', function(){ try{ load(); var l = document.getElementById('list'); if(l && l.scrollIntoView) l.scrollIntoView({behavior:'smooth'}); }catch(e){ console.error('myCourses load error', e); } }); }
+
+    var importBtn = document.getElementById('import');
+    if(importBtn) importBtn.addEventListener('click', function(){
+      var toImport = null;
+      if(_lastPreview) toImport = JSON.parse(JSON.stringify(_lastPreview));
+      else toImport = parseCoursePlain((document.getElementById('raw')||{value:''}).value||'');
+      if(!toImport || !toImport.title){ alert('No hay curso válido para importar'); return; }
+      // ensure short_description when importing from preview or parsed text
+      try{
+        if(!toImport.short_description || !String(toImport.short_description).trim()){
+          var sd2 = String(toImport.description || '').split(/\r?\n/).join(' ').trim(); if(sd2) sd2 = sd2.slice(0,160); toImport.short_description = sd2 || '';
+        }
+      }catch(e){}
+      // ensure id
+      if(!toImport.id) toImport.id = uid();
+      // push and select
+      courses.push(toImport); save(); selectedCourseId = toImport.id; renderList(); (document.getElementById('raw')||{value:''}).value=''; _lastPreview = null; alert('Curso importado');
+    });
+
+    var importJsonBtn = document.getElementById('importJson');
+    if(importJsonBtn) importJsonBtn.addEventListener('click', function(){
+      var raw = (document.getElementById('rawJson')||{value:''}).value||'';
+      if(!raw.trim()){ alert('Pega el JSON del curso en el campo "Importar JSON"'); return; }
+      try{
+        var obj = JSON.parse(raw);
+      }catch(e){ alert('JSON inválido: '+e.message); return; }
+      // If the parsed object has a title that actually contains raw labeled text (blob), try to reparsed
+      if(obj && obj.title && /\bCATEGORIA:|\bDESCRIPCION:|\bPRECIO:/i.test(String(obj.title))){
+        try{
+          var reparsed = parseCoursePlain(String(obj.title));
+          // merge reparsed fields into obj if they look empty
+          obj.title = obj.title && obj.title.trim() && obj.title.length>1 && !/^\{/.test(obj.title) ? reparsed.title || obj.title : reparsed.title || obj.title;
+          obj.category = obj.category || reparsed.category;
+          obj.short_description = obj.short_description || reparsed.short_description;
+          obj.description = obj.description || reparsed.description;
+          obj.price = obj.price || reparsed.price;
+          if((!obj.modules || !obj.modules.length) && reparsed.modules && reparsed.modules.length) obj.modules = reparsed.modules;
+          if((!obj.evaluation || !obj.evaluation.length) && reparsed.evaluation && reparsed.evaluation.length) obj.evaluation = reparsed.evaluation;
+        }catch(e){}
+      }
+      var ok = importCourseObject(obj);
+      if(ok) { (document.getElementById('rawJson')||{value:''}).value=''; }
+    });
+
+    // Cleanup button: backup localStorage and repair malformed entries (title contains labeled blob)
+    var cleanupBtn = document.getElementById('cleanupBtn');
+    if(cleanupBtn) cleanupBtn.addEventListener('click', function(){
+      try{ cleanupBtn.disabled = true; cleanupBtn.textContent = 'Procesando...'; }
+      catch(e){}
+      try{
+        var before = (localStorage.getItem(storageKey)||'[]');
+        // create backup download
+        var blobStr = before;
+        var a = document.createElement('a'); a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(blobStr); a.download = 'prime_courses-backup.json'; document.body.appendChild(a); a.click(); a.remove();
+      }catch(e){ console.error('backup failed', e); }
+
+      // perform repair and dedupe
+      var repaired = 0, total = 0;
+      try{
+        var arr = courses.slice();
+        arr = arr.map(function(c){ total++; var copy = JSON.parse(JSON.stringify(c||{}));
+          if(copy.title && /\bCATEGORIA:|\bDESCRIPCION:|\bPRECIO:/i.test(String(copy.title))){
+            try{ var p = parseCoursePlain(String(copy.title));
+              copy.title = p.title || copy.title; copy.category = copy.category || p.category; copy.short_description = copy.short_description || p.short_description; copy.description = copy.description || p.description; copy.price = copy.price || p.price; if((!copy.modules||!copy.modules.length)&&p.modules&&p.modules.length) copy.modules = p.modules; if((!copy.evaluation||!copy.evaluation.length)&&p.evaluation&&p.evaluation.length) copy.evaluation = p.evaluation; repaired++; }
+            catch(e){ }
+          }
+          return copy;
+        });
+        // dedupe
+        var map = {}, out = [];
+        arr.forEach(function(c){ var k = c.id ? String(c.id) : (String(c.title||'')+'|'+String(c.price||0)); if(!map[k]){ map[k]=true; out.push(c); } });
+        courses = out;
+        try{ localStorage.setItem(storageKey, JSON.stringify(courses)); }catch(e){}
+      }catch(e){ console.error('cleanup error', e); }
+
+      renderList();
+      try{ cleanupBtn.textContent = 'Limpiar duplicados y reparar'; cleanupBtn.disabled = false; }
+      catch(e){}
+      alert('Limpieza completada. Entradas totales: '+total+' — reparadas: '+repaired);
+    });
+
+    var _lastPreview = null;
+    function renderPreview(parsed){
+      _lastPreview = JSON.parse(JSON.stringify(parsed || {}));
+      var area = document.getElementById('previewArea'); if(!area) return;
+      area.style.display = 'block'; area.innerHTML = '';
+
+      var header = document.createElement('div'); header.style.display='flex'; header.style.alignItems='center'; header.style.gap='12px';
+      var titleEl = document.createElement('div'); titleEl.contentEditable = true; titleEl.style.fontWeight='700'; titleEl.style.fontSize='18px'; titleEl.textContent = _lastPreview.title || '(sin título)';
+      // allow pasting an image into the title to set the course cover (prevent inserting HTML into title)
+      titleEl.addEventListener('paste', function(e){
+        try{
+          var cb = e.clipboardData || window.clipboardData;
+          if(!cb) return;
+          // image files from clipboard
+          if(cb.items && cb.items.length){
+            for(var i=0;i<cb.items.length;i++){
+              var it = cb.items[i];
+              if(it && it.kind === 'file' && it.type && it.type.indexOf('image/') === 0){
+                e.preventDefault();
+                var f = it.getAsFile();
+                var fr = new FileReader();
+                fr.onload = function(ev){
+                  var data = ev.target.result;
+                  coverImg.src = data; coverImg.style.display = 'block'; coverUrl.value = '';
+                  try{ _lastPreview.image = data; }catch(err){}
+                };
+                fr.readAsDataURL(f);
+                return;
+              }
+            }
+          }
+          // HTML with <img>
+          var html = cb.getData && cb.getData('text/html');
+          if(html){
+            var m = html.match(/<img\s+[^>]*src=["']([^"']+)["']/i);
+            if(m && m[1]){ e.preventDefault(); var src = m[1]; coverImg.src = src; coverImg.style.display = 'block'; coverUrl.value = src; try{ _lastPreview.image = src; }catch(err){}; return; }
+          }
+          // plain data URL or image URL text
+          var txt = cb.getData && (cb.getData('text/plain')||cb.getData('text'));
+          if(txt){ txt = txt.trim(); if(/^data:image\//i.test(txt)){ e.preventDefault(); coverImg.src = txt; coverImg.style.display = 'block'; coverUrl.value = ''; try{ _lastPreview.image = txt; }catch(err){} } else if(/^(https?:)?\/\//i.test(txt)){ e.preventDefault(); coverImg.src = txt; coverImg.style.display = 'block'; coverUrl.value = txt; try{ _lastPreview.image = txt; }catch(err){} } }
+        }catch(err){ console.error('title paste error', err); }
+      });
+      var catEl = document.createElement('div'); catEl.contentEditable = true; catEl.className='muted'; catEl.textContent = _lastPreview.category || '';
+      header.appendChild(titleEl); header.appendChild(catEl);
+      area.appendChild(header);
+
+      // Precio y descuento
+      var priceRow = document.createElement('div'); priceRow.style.marginTop = '8px'; priceRow.style.display = 'flex'; priceRow.style.alignItems = 'center'; priceRow.style.gap = '8px';
+      var priceLabel = document.createElement('div'); priceLabel.className = 'muted'; priceLabel.style.minWidth = '90px'; priceLabel.textContent = 'Precio (USD):'; priceRow.appendChild(priceLabel);
+      var priceInput = document.createElement('input'); priceInput.type = 'number'; priceInput.step = '0.01'; priceInput.min = '0'; priceInput.style.width = '140px'; priceInput.value = (_lastPreview && _lastPreview.price!==undefined) ? _lastPreview.price : '';
+      priceRow.appendChild(priceInput);
+
+      var discountLabel = document.createElement('div'); discountLabel.className = 'muted'; discountLabel.textContent = 'Descuento (%):'; priceRow.appendChild(discountLabel);
+      var discountInput = document.createElement('input'); discountInput.type = 'number'; discountInput.step = '1'; discountInput.min = '0'; discountInput.max = '100'; discountInput.style.width = '80px'; discountInput.value = (_lastPreview && _lastPreview.discount_pct!==undefined) ? _lastPreview.discount_pct : '';
+      priceRow.appendChild(discountInput);
+
+      var discountedPreview = document.createElement('div'); discountedPreview.className = 'muted'; discountedPreview.style.marginLeft = 'auto'; discountedPreview.textContent = 'Precio final: -'; priceRow.appendChild(discountedPreview);
+
+      function updateDiscountPreview(){
+        var p = parseFloat(priceInput.value);
+        if(isNaN(p)) p = 0;
+        var d = parseFloat(discountInput.value);
+        if(isNaN(d) || d < 0) d = 0;
+        if(d > 100) d = 100;
+        var final = p * (1 - (d/100));
+        discountedPreview.textContent = 'Precio final: $' + final.toFixed(2);
+        try{ _lastPreview.price = p; _lastPreview.discount_pct = d; }catch(e){}
+      }
+      priceInput.addEventListener('input', updateDiscountPreview);
+      discountInput.addEventListener('input', updateDiscountPreview);
+      // initialize preview values
+      try{ updateDiscountPreview(); }catch(e){}
+      area.appendChild(priceRow);
+
+      // Cover image controls (URL + file) for course portada
+      var coverWrap = document.createElement('div'); coverWrap.style.display='flex'; coverWrap.style.alignItems='center'; coverWrap.style.gap='8px'; coverWrap.style.marginTop='8px';
+      var coverLabel = document.createElement('div'); coverLabel.textContent = 'Imagen portada:'; coverLabel.className='muted'; coverLabel.style.minWidth='110px'; coverWrap.appendChild(coverLabel);
+      var coverUrl = document.createElement('input'); coverUrl.type='text'; coverUrl.placeholder='URL de imagen (opcional)'; coverUrl.style.flex='1'; coverUrl.value = _lastPreview.image || '';
+      var coverFile = document.createElement('input'); coverFile.type='file'; coverFile.accept='image/*'; coverFile.style.marginLeft='6px';
+      var coverImg = document.createElement('img'); coverImg.style.width='100px'; coverImg.style.height='60px'; coverImg.style.objectFit='cover'; coverImg.style.borderRadius='6px'; coverImg.style.display = _lastPreview.image ? 'block' : 'none'; if(_lastPreview.image) coverImg.src = _lastPreview.image;
+      coverWrap.appendChild(coverUrl); coverWrap.appendChild(coverFile); coverWrap.appendChild(coverImg);
+      area.appendChild(coverWrap);
+
+      // handlers to sync cover image into model
+      coverUrl.addEventListener('change', function(){ var v = coverUrl.value.trim(); if(v){ coverImg.src = v; coverImg.style.display='block'; try{ _lastPreview.image = v; }catch(e){} } else { coverImg.removeAttribute('src'); coverImg.style.display='none'; try{ _lastPreview.image = null; }catch(e){} } });
+      coverFile.addEventListener('change', function(){ var f = coverFile.files && coverFile.files[0]; if(!f) return; var r = new FileReader(); r.onload = function(ev){ coverImg.src = ev.target.result; coverImg.style.display='block'; try{ _lastPreview.image = ev.target.result; }catch(e){} }; r.onerror = function(){ alert('Error leyendo imagen de portada.'); }; r.readAsDataURL(f); });
+
+      // Allow paste directly (Ctrl+V) of images into cover area or into the URL input
+      function handleCoverPaste(e){
+        try{
+          var cb = e.clipboardData || window.clipboardData;
+          if(!cb) return;
+          // Check for image file in clipboard
+          if(cb.items && cb.items.length){
+            for(var i=0;i<cb.items.length;i++){
+              var it = cb.items[i];
+              if(it && it.kind === 'file' && it.type && it.type.indexOf('image/') === 0){
+                e.preventDefault();
+                var f = it.getAsFile();
+                var fr = new FileReader();
+                fr.onload = function(ev){
+                  var data = ev.target.result;
+                  coverImg.src = data; coverImg.style.display='block'; coverUrl.value = '';
+                  try{ _lastPreview.image = data; }catch(err){}
+                };
+                fr.readAsDataURL(f);
+                return;
+              }
+            }
+          }
+          // Fallback: if HTML contains an <img src='...'> use that
+          var html = cb.getData && cb.getData('text/html');
+          if(html){
+            var m = html.match(/<img\s+[^>]*src=["']([^"']+)["']/i);
+            if(m && m[1]){
+              e.preventDefault();
+              var src = m[1];
+              coverImg.src = src; coverImg.style.display='block'; coverUrl.value = src;
+              try{ _lastPreview.image = src; }catch(err){}
+              return;
+            }
+          }
+          // Also support plain text paste of a data URL or image URL
+          var txt = cb.getData && (cb.getData('text/plain')||cb.getData('text'));
+          if(txt && /^data:image\//i.test(txt.trim())){
+            e.preventDefault(); coverImg.src = txt.trim(); coverImg.style.display='block'; coverUrl.value = '';
+            try{ _lastPreview.image = txt.trim(); }catch(err){}
+          } else if(txt && /^(https?:)?\/\//i.test(txt.trim())){
+            // likely an image URL
+            e.preventDefault(); var srcUrl = txt.trim(); coverImg.src = srcUrl; coverImg.style.display='block'; coverUrl.value = srcUrl; try{ _lastPreview.image = srcUrl; }catch(err){}
+          }
+        }catch(err){ console.error('cover paste error', err); }
+      }
+      // attach to coverWrap and coverUrl so paste works when focus is on input or on the area
+      try{ coverWrap.addEventListener('paste', handleCoverPaste); coverUrl.addEventListener('paste', handleCoverPaste); }catch(e){}
+
+      var btns = document.createElement('div'); btns.style.marginTop='8px';
+      var viewBtn = document.createElement('button'); viewBtn.className='btn'; viewBtn.textContent='Ver como alumno';
+      // when opening student view, ensure latest editable fields are copied into _lastPreview
+      viewBtn.addEventListener('click', function(){
+        _lastPreview.title = titleEl.textContent.trim();
+        _lastPreview.category = catEl.textContent.trim();
+        _lastPreview.description = descEl.textContent.trim();
+        // ensure modules/submodules have current content from any editable nodes (they are kept in sync by listeners, but do a last-pass)
+        var modEls = modsWrap && modsWrap.querySelectorAll ? modsWrap.querySelectorAll('div') : [];
+        // ensure cover image is in the model
+        try{ if(typeof coverImg !== 'undefined' && coverImg && coverImg.src) _lastPreview.image = coverImg.src; }catch(e){}
+        // open student view with current state
+        openStudentView(_lastPreview);
+      });
+      btns.appendChild(viewBtn);
+      // Save course button: persist current _lastPreview into storage and refresh list
+      var saveBtn = document.createElement('button'); saveBtn.className = 'btn'; saveBtn.textContent = 'Guardar curso'; saveBtn.style.marginLeft = '8px';
+      saveBtn.addEventListener('click', function(){
+        try{
+          // ensure latest edits copied
+          _lastPreview.title = titleEl.textContent.trim();
+          _lastPreview.category = catEl.textContent.trim();
+          _lastPreview.description = descEl.textContent.trim();
+          // ensure short_description exists (derive from description if needed)
+          try{
+            if(!(_lastPreview.short_description && String(_lastPreview.short_description).trim())){
+              var sd = String(_lastPreview.description || '').split(/\r?\n/).join(' ').trim();
+              if(sd) sd = sd.slice(0,160);
+              _lastPreview.short_description = sd || '';
+            }
+          }catch(e){}
+          try{ if(typeof coverImg !== 'undefined' && coverImg && coverImg.src) _lastPreview.image = coverImg.src; }catch(e){}
+          // ensure id
+          if(!_lastPreview.id) _lastPreview.id = uid();
+          // normalize modules array
+          if(!_lastPreview.modules) _lastPreview.modules = [];
+          // If the title contains a labeled blob (pasted raw), try to reparsed it and merge fields
+          try{
+            if(_lastPreview.title && /\bCATEGORIA:|\bDESCRIPCION:|\bPRECIO:/i.test(String(_lastPreview.title)) && typeof parseCoursePlain === 'function'){
+              try{
+                var reparsed = parseCoursePlain(String(_lastPreview.title));
+                _lastPreview.title = reparsed.title || _lastPreview.title;
+                _lastPreview.category = _lastPreview.category || reparsed.category;
+                _lastPreview.short_description = _lastPreview.short_description || reparsed.short_description;
+                _lastPreview.description = _lastPreview.description || reparsed.description;
+                _lastPreview.price = (_lastPreview.price || reparsed.price) || 0;
+                if((!_lastPreview.modules || !_lastPreview.modules.length) && reparsed.modules && reparsed.modules.length) _lastPreview.modules = reparsed.modules;
+                if((!_lastPreview.evaluation || !_lastPreview.evaluation.length) && reparsed.evaluation && reparsed.evaluation.length) _lastPreview.evaluation = reparsed.evaluation;
+              }catch(e){}
+            }
+          }catch(e){}
+          // update or insert into courses
+          var idx = courses.findIndex(function(x){ return String(x.id) === String(_lastPreview.id); });
+          // deep-copy snapshot and add frontend-friendly aliases so the public UI can read it
+          var snap = JSON.parse(JSON.stringify(_lastPreview));
+          try{
+            snap.img = snap.image || snap.img || '';
+          }catch(e){ snap.img = snap.img || ''; }
+          try{
+            snap.desc = snap.short_description || snap.description || snap.desc || '';
+          }catch(e){ snap.desc = snap.desc || ''; }
+          try{ snap.price = (snap.price!==undefined && snap.price!==null) ? Number(snap.price) : 0; }catch(e){ snap.price = 0; }
+          try{ snap.discount_pct = (snap.discount_pct!==undefined && snap.discount_pct!==null) ? Number(snap.discount_pct) : 0; }catch(e){ snap.discount_pct = 0; }
+          try{ snap.featured = Boolean(snap.featured) || (Array.isArray(snap.modules) && snap.modules.length>0); }catch(e){ snap.featured = Boolean(snap.featured); }
+          if(idx >= 0){ courses[idx] = snap; }
+          else { courses.push(snap); }
+          // persist and refresh (local copy)
+          try{ localStorage.setItem(storageKey, JSON.stringify(courses)); }catch(e){}
+          try{ broadcastUpdate(); }catch(e){}
+          selectedCourseId = _lastPreview.id;
+          renderList();
+
+          // Also try to persist server-side (non-blocking). This will create/update
+          // prime-cursos/courses.json via save_course.php. Failures are logged to console only.
+          try{
+            (function(courseSnapshot){
+              fetch('save_course.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ course: courseSnapshot })
+              }).then(function(res){
+                if(!res.ok) return res.text().then(function(t){ console.error('save_course.php error:', t); });
+                return res.json();
+              }).then(function(json){ if(json && json.success && window.console) console.info('Curso guardado en servidor:', json.saved || courseSnapshot.id); }).catch(function(err){ if(window.console) console.warn('No se pudo guardar en servidor', err); });
+            })(snap);
+          }catch(e){ if(window.console) console.warn('Server save attempt failed', e); }
+          // hide preview and clear last preview, then scroll to the saved course in the list
+          try{ area.style.display = 'none'; _lastPreview = null; }catch(err){}
+          try{
+            var listEl = document.getElementById('list');
+            if(listEl && listEl.scrollIntoView) listEl.scrollIntoView({ behavior: 'smooth' });
+            var radioEl = document.getElementById('course_' + String(selectedCourseId));
+            if(radioEl && radioEl.scrollIntoView) { radioEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); radioEl.focus(); }
+          }catch(err){}
+          try{ alert('Curso guardado'); }catch(e){}
+        }catch(err){ console.error('save course error', err); alert('No se pudo guardar el curso: '+(err && err.message || err)); }
+      });
+      btns.appendChild(saveBtn);
+      area.appendChild(btns);
+
+      var descWrap = document.createElement('div'); descWrap.style.marginTop='10px';
+      var descEl = document.createElement('div'); descEl.contentEditable = true; descEl.style.whiteSpace='pre-wrap'; descEl.style.border='1px solid rgba(0,0,0,0.06)'; descEl.style.padding='8px'; descEl.style.borderRadius='6px'; descEl.textContent = _lastPreview.description || _lastPreview.short_description || '';
+      descWrap.appendChild(descEl);
+      area.appendChild(descWrap);
+
+      // Modules and submodules editable
+      var modsWrap = document.createElement('div'); modsWrap.style.marginTop='12px';
+      var mh = document.createElement('h4'); mh.textContent = 'Módulos y Submódulos'; modsWrap.appendChild(mh);
+      (_lastPreview.modules||[]).forEach(function(m,mi){
+        var mdiv = document.createElement('div'); mdiv.style.border='1px solid rgba(255,255,255,0.03)'; mdiv.style.padding='8px'; mdiv.style.borderRadius='8px'; mdiv.style.marginTop='8px';
+        var mt = document.createElement('div'); mt.contentEditable = true; mt.style.fontWeight='600'; mt.textContent = m.title || ('Módulo '+(mi+1)); mdiv.appendChild(mt);
+        // submodules list
+        var swrap = document.createElement('div'); swrap.style.marginTop='6px';
+        (m.submodules||[]).forEach(function(s,si){
+          var sdiv = document.createElement('div'); sdiv.style.padding='6px'; sdiv.style.border='1px dashed rgba(255,255,255,0.02)'; sdiv.style.borderRadius='6px'; sdiv.style.marginTop='6px';
+          var st = document.createElement('div'); st.contentEditable = true; st.style.fontWeight='500'; st.textContent = s.title || ('Submodulo '+(si+1)); sdiv.appendChild(st);
+          var sc = document.createElement('div'); sc.contentEditable = true; sc.style.whiteSpace='pre-wrap'; sc.style.marginTop='6px';
+          // use innerHTML so pasted <img> nodes are preserved in the submodule content
+          sc.innerHTML = s.content || '';
+          // Handle paste events: if user pastes an image (clipboard file or HTML <img>), import it properly
+          sc.addEventListener('paste', function(e){
+            try{
+              var cb = e.clipboardData || window.clipboardData;
+              if(!cb) return;
+              // Check for image files in clipboard items
+              var foundFile = null;
+              if(cb.items && cb.items.length){
+                for(var ii=0; ii<cb.items.length; ii++){
+                  var it = cb.items[ii];
+                  if(it && it.kind === 'file' && it.type && it.type.indexOf('image/') === 0){ foundFile = it.getAsFile(); break; }
+                }
+              }
+              if(foundFile){
+                e.preventDefault();
+                var fr = new FileReader();
+                fr.onload = function(ev){
+                  var data = ev.target.result;
+                  // set preview image and model
+                  img.src = data; img.style.display = 'block';
+                  try{ _lastPreview.modules[mi].submodules[si].image = data; }catch(err){}
+                  dbg.textContent = JSON.stringify(_lastPreview,null,2);
+                  // insert image node at caret position inside the editable div
+                  try{
+                    var sel = window.getSelection();
+                    if(sel && sel.rangeCount){
+                      var range = sel.getRangeAt(0);
+                      range.deleteContents();
+                      var newImg = document.createElement('img'); newImg.className='pc-preview-img'; newImg.src = data;
+                      range.insertNode(newImg);
+                      // move caret after inserted image
+                      range.setStartAfter(newImg);
+                      sel.removeAllRanges(); sel.addRange(range);
+                    }
+                  }catch(err){ console.error('insert image error', err); }
+                };
+                fr.readAsDataURL(foundFile);
+                return;
+              }
+              // If no file, check for HTML containing <img src="...">
+              var html = cb.getData && cb.getData('text/html');
+              if(html){
+                var m = html.match(/<img\s+[^>]*src=["']([^"']+)["']/i);
+                if(m && m[1]){
+                  e.preventDefault();
+                  var src = m[1];
+                  // set preview image; remote URLs may fail due to CORS/SameSite
+                  img.onload = function(){ img.style.display = 'block'; };
+                  img.onerror = function(){ img.style.display = 'none'; try{ _lastPreview.modules[mi].submodules[si].image = null; }catch(e){}; alert('No se pudo cargar la imagen pegada. Usa subida por archivo o pega una URL directa.'); };
+                  img.src = src;
+                  try{ _lastPreview.modules[mi].submodules[si].image = src; }catch(err){}
+                  dbg.textContent = JSON.stringify(_lastPreview,null,2);
+                }
+              }
+            }catch(err){ console.error('paste handler error', err); }
+          });
+          sdiv.appendChild(sc);
+          // image preview + controls
+          var imgWrap = document.createElement('div'); imgWrap.style.marginTop='6px';
+          var img = document.createElement('img');
+          // assign an explicit class so we can isolate this preview from global CSS
+          img.className = 'pc-preview-img';
+          try{
+            img.style.setProperty('max-width','180px','important');
+            img.style.setProperty('max-height','140px','important');
+            img.style.setProperty('display', s.image ? 'block' : 'none', 'important');
+            img.style.setProperty('object-fit','contain','important');
+            img.style.setProperty('width','auto','important');
+            img.style.setProperty('height','auto','important');
+            img.style.setProperty('border-radius','6px','important');
+            img.style.setProperty('background','transparent','important');
+          }catch(e){
+            // fallback to non-important assignments if setProperty fails
+            img.style.maxWidth = '180px'; img.style.maxHeight = '140px'; img.style.display = s.image ? 'block' : 'none'; img.style.objectFit = 'contain'; img.style.width='auto'; img.style.height='auto'; img.style.borderRadius='6px'; img.style.background='transparent';
+          }
+          if(s.image) img.src = s.image;
+          imgWrap.appendChild(img);
+            // handle load errors (e.g. redirected Google Photos links blocked by SameSite)
+            img.onerror = function(ev){
+              img.style.display = 'none';
+              // keep underlying model image null if it fails to load
+              try{ _lastPreview.modules[mi].submodules[si].image = null; }catch(e){}
+              // Inform the admin user about likely cause and workaround
+              alert('No se pudo cargar la imagen desde la URL. Algunos enlaces (p. ej. Google Photos) redirigen y son bloqueados por políticas del navegador (SameSite). Usa la subida por archivo o una URL directa a la imagen.');
+            };
+          var urlIn = document.createElement('input'); urlIn.type='text'; urlIn.placeholder='URL de imagen (opcional)'; urlIn.style.width='60%'; urlIn.style.marginRight='6px'; urlIn.value = s.image||'';
+          var fileIn = document.createElement('input'); fileIn.type='file'; fileIn.accept='image/*'; fileIn.style.display='inline-block'; fileIn.style.marginLeft='6px';
+          imgWrap.appendChild(urlIn); imgWrap.appendChild(fileIn);
+          var rmBtn = document.createElement('button'); rmBtn.textContent='Eliminar submod'; rmBtn.className='btn'; rmBtn.style.background='#b03b3b'; rmBtn.style.marginLeft='8px'; imgWrap.appendChild(rmBtn);
+          sdiv.appendChild(imgWrap);
+
+          // events to keep _lastPreview in sync
+          mt.addEventListener('input', function(){ _lastPreview.modules[mi].title = mt.textContent.trim(); dbg.textContent = JSON.stringify(_lastPreview,null,2); });
+          st.addEventListener('input', function(){ _lastPreview.modules[mi].submodules[si].title = st.textContent.trim(); dbg.textContent = JSON.stringify(_lastPreview,null,2); });
+          sc.addEventListener('input', function(){
+            // Store innerHTML so inline images inserted into the editable area are kept
+            try{ _lastPreview.modules[mi].submodules[si].content = sc.innerHTML.trim(); }catch(e){}
+            dbg.textContent = JSON.stringify(_lastPreview,null,2);
+          });
+          urlIn.addEventListener('change', function(){ var v = urlIn.value.trim(); if(v){
+            // set handlers to detect success/failure
+            img.onload = function(){ img.style.display = 'block'; };
+            img.onerror = function(){ img.style.display = 'none'; try{ _lastPreview.modules[mi].submodules[si].image = null; }catch(e){}; alert('No se pudo cargar la imagen desde la URL. Algunos enlaces (p. ej. Google Photos) redirigen y son bloqueados por políticas del navegador (SameSite). Usa la subida por archivo o una URL directa a la imagen.'); };
+            // assign src (this will trigger onload/onerror)
+            img.src = v;
+            // optimistically store the URL (will be cleared on error above)
+            try{ _lastPreview.modules[mi].submodules[si].image = v; }catch(e){}
+          } else { img.removeAttribute('src'); img.style.display='none'; try{ _lastPreview.modules[mi].submodules[si].image = null; }catch(e){} } dbg.textContent = JSON.stringify(_lastPreview,null,2); });
+          fileIn.addEventListener('change', function(){ var f = fileIn.files && fileIn.files[0]; if(!f) return; var r = new FileReader(); r.onload = function(ev){ img.src = ev.target.result; img.style.display='block'; _lastPreview.modules[mi].submodules[si].image = ev.target.result; dbg.textContent = JSON.stringify(_lastPreview,null,2); }; r.onerror = function(ev){ alert('Error leyendo imagen: '+(r.error && r.error.message || '')); console.error('FileReader error', r.error); }; r.readAsDataURL(f); });
+          rmBtn.addEventListener('click', function(){ _lastPreview.modules[mi].submodules.splice(si,1); sdiv.remove(); dbg.textContent = JSON.stringify(_lastPreview,null,2); });
+
+          swrap.appendChild(sdiv);
+        });
+        // add submodule button
+        var addSub = document.createElement('button'); addSub.className='btn'; addSub.textContent='Añadir submódulo'; addSub.style.marginTop='8px';
+        addSub.addEventListener('click', function(){ var nm = { title:'Nuevo submódulo', content:'', image:null }; _lastPreview.modules[mi].submodules.push(nm); renderPreview(_lastPreview); });
+        mdiv.appendChild(swrap); mdiv.appendChild(addSub);
+        modsWrap.appendChild(mdiv);
+      });
+      area.appendChild(modsWrap);
+
+      // edits are persisted live into _lastPreview by event listeners; no separate save button needed
+
+      // Debug JSON (hidden by default). Toggle with checkbox below.
+      var dbgToggleWrap = document.createElement('div'); dbgToggleWrap.style.marginTop = '8px'; dbgToggleWrap.style.display = 'flex'; dbgToggleWrap.style.alignItems = 'center'; dbgToggleWrap.style.gap = '8px';
+      var dbgCb = document.createElement('input'); dbgCb.type = 'checkbox'; dbgCb.id = 'dbgShow'; dbgCb.style.marginRight = '6px';
+      var dbgLabel = document.createElement('label'); dbgLabel.htmlFor = 'dbgShow'; dbgLabel.textContent = 'Mostrar JSON (debug)'; dbgLabel.className = 'muted';
+      dbgToggleWrap.appendChild(dbgCb); dbgToggleWrap.appendChild(dbgLabel); area.appendChild(dbgToggleWrap);
+
+      var dbg = document.createElement('pre'); dbg.style.marginTop='8px'; dbg.style.background='rgba(0,0,0,0.04)'; dbg.style.padding='8px'; dbg.style.display = 'none'; dbg.textContent = JSON.stringify(_lastPreview,null,2); area.appendChild(dbg);
+      dbgCb.addEventListener('change', function(){ dbg.style.display = dbgCb.checked ? 'block' : 'none'; });
+    }
+
+    // Import a plain object (from JSON) into storage after basic validation/normalization
+    function importCourseObject(obj){
+      if(!obj || typeof obj !== 'object') { alert('Objeto inválido'); return false; }
+      // Ensure required fields
+      if(!obj.title) { alert('El curso JSON debe tener `title`'); return false; }
+      // If title looks like a pasted raw block with labels, try parsing it
+      if(obj.title && /\bCATEGORIA:|\bDESCRIPCION:|\bPRECIO:/i.test(String(obj.title))){
+        try{
+          var parsedFromTitle = parseCoursePlain(String(obj.title));
+          obj.title = parsedFromTitle.title || obj.title;
+          obj.category = obj.category || parsedFromTitle.category;
+          obj.short_description = obj.short_description || parsedFromTitle.short_description;
+          obj.description = obj.description || parsedFromTitle.description;
+          obj.price = obj.price || parsedFromTitle.price;
+          if((!obj.modules || !obj.modules.length) && parsedFromTitle.modules && parsedFromTitle.modules.length) obj.modules = parsedFromTitle.modules;
+          if((!obj.evaluation || !obj.evaluation.length) && parsedFromTitle.evaluation && parsedFromTitle.evaluation.length) obj.evaluation = parsedFromTitle.evaluation;
+        }catch(e){}
+      }
+      // Normalize price
+      if(obj.price !== undefined) obj.price = Number(obj.price) || 0;
+      // Ensure modules array
+      if(!Array.isArray(obj.modules)) obj.modules = obj.modules ? [obj.modules] : [];
+      // Add id if missing
+      if(!obj.id) obj.id = uid();
+      // Normalize evaluation items: ensure options are in {key,text} form if provided as strings
+      if(Array.isArray(obj.evaluation)){
+        obj.evaluation = obj.evaluation.map(function(q){
+          if(!q) return q;
+          var out = { question: q.question || q.text || '', options: [], answer: q.answer || null };
+          if(Array.isArray(q.options) && q.options.length){
+            q.options.forEach(function(o,idx){
+              if(typeof o === 'string'){
+                var hasStar = /\*/.test(o);
+                var txt = String(o).replace(/\*/g,'').trim();
+                var key = String.fromCharCode(65+idx);
+                out.options.push({ key: key, text: txt });
+                if(hasStar) out.answer = key;
+              } else {
+                var rawText = String(o.text || '');
+                var hasStarObj = /\*/.test(rawText);
+                var txtObj = rawText.replace(/\*/g,'').trim();
+                var keyObj = o.key || String.fromCharCode(65+idx);
+                out.options.push({ key: keyObj, text: txtObj });
+                if(hasStarObj) out.answer = keyObj;
+                if(o.answer) out.answer = o.answer;
+              }
+            });
+          }
+          return out;
+        });
+      }
+      // Basic modules/submodules normalization
+      obj.modules = obj.modules.map(function(m){ m = m || {}; if(!m.title) m.title = m.module_title || 'Módulo'; if(!Array.isArray(m.submodules)) m.submodules = m.submodules ? [m.submodules] : []; return m; });
+      // Normalize module-level evaluations if present
+      obj.modules.forEach(function(m){
+        if(Array.isArray(m.evaluation) && m.evaluation.length){
+          m.evaluation = m.evaluation.map(function(q){
+            if(!q) return q;
+            var out = { question: q.question || q.text || '', options: [], answer: q.answer || null };
+            if(Array.isArray(q.options) && q.options.length){
+              q.options.forEach(function(o,idx){
+                if(typeof o === 'string'){
+                  var hasStar = /\*/.test(o);
+                  var txt = String(o).replace(/\*/g,'').trim();
+                  var key = String.fromCharCode(65+idx);
+                  out.options.push({ key: key, text: txt });
+                  if(hasStar) out.answer = key;
+                } else {
+                  var rawText = String(o.text || '');
+                  var hasStarObj = /\*/.test(rawText);
+                  var txtObj = rawText.replace(/\*/g,'').trim();
+                  var keyObj = o.key || String.fromCharCode(65+idx);
+                  out.options.push({ key: keyObj, text: txtObj });
+                  if(hasStarObj) out.answer = keyObj;
+                  if(o.answer) out.answer = o.answer;
+                }
+              });
+            }
+            return out;
+          });
+        }
+      });
+      // ensure id and push
+      if(!obj.id) obj.id = uid();
+      courses.push(obj);
+      // dedupe after push and persist
+      var map = {};
+      courses = courses.reduce(function(acc,curr){ var k = curr.id ? String(curr.id) : (String(curr.title||'')+'|'+String(curr.price||0)); if(!map[k]){ map[k]=true; acc.push(curr); } return acc; }, []);
+      try{ localStorage.setItem(storageKey, JSON.stringify(courses)); }catch(e){}
+      save(); selectedCourseId = obj.id; renderList(); alert('Curso importado desde JSON');
+      return true;
+    }
+
+    function openStudentView(parsed){
+      // Helper: reduce a possibly noisy title (pasted raw block) to a single clean course name
+      function cleanTitle(raw){
+        var t = String(raw||'').trim();
+        // If the title contains a labeled blob (DESCRIPCION, PRECIO, CATEGORIA), cut there
+        var m = t.match(/^(.*?)(?:\bDESCRIPCION:|\bPRECIO:|\bCATEGORIA:)/i);
+        if(m && m[1]) t = m[1].trim();
+        // take the first non-empty line
+        var lines = t.split(/\r?\n/).map(function(l){ return l.trim(); }).filter(Boolean);
+        t = lines.length ? lines[0] : t;
+        if(!t) return 'Curso';
+        if(t.length > 80) t = t.slice(0,80) + '…';
+        return t;
+      }
+      var w = window.open('','_blank','width=980,height=700'); if(!w) return alert('Popup bloqueado');
+      // compute a cleaned, short title and use it both for the document <title> and the visible H2
+      var visibleTitle = cleanTitle(parsed.title || parsed.short_description || parsed.description);
+      var d = w.document; d.open(); d.write('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+escapeHtml(visibleTitle||'Curso')+'</title></head><body></body></html>'); d.close();
+      var css = d.createElement('style'); css.textContent = '\n        body{font-family:Inter,system-ui,Segoe UI,Arial;margin:0;background:#f4f6f8;color:#0b2433} .wrap{max-width:1100px;margin:12px auto;padding:12px} .shell{display:flex;gap:12px} .left{width:300px;background:#fff;padding:12px;border-radius:8px} .right{flex:1;background:#fff;padding:16px;border-radius:8px} .module{padding:10px;border-radius:6px;margin-bottom:8px;cursor:pointer} .module.locked{opacity:0.5} .sub{padding:10px;border-radius:6px;margin-bottom:8px;border:1px solid #eef3fb} .progress{height:12px;background:#eef5fb;border-radius:999px;overflow:hidden} .progress > i{display:block;height:100%;background:#0b79d0;width:0%} .btn{display:inline-block;padding:8px 12px;border-radius:8px;background:#0b79d0;color:#fff;border:0;cursor:pointer} .muted{color:#6b7280} \n        /* Hide a possible duplicate image placed below the main image in the left panel */\n        .left img + img { display: none; }';
+      d.head.appendChild(css);
+
+      var body = d.body; var wrap = d.createElement('div'); wrap.className='wrap'; var title = d.createElement('h2'); title.textContent = visibleTitle || 'Curso'; title.style.margin='0 0 8px 0'; wrap.appendChild(title);
+      var shell = d.createElement('div'); shell.className='shell'; var left = d.createElement('div'); left.className='left'; var right = d.createElement('div'); right.className='right';
+
+      // progress
+      var progressLabel = d.createElement('div'); progressLabel.className='muted'; progressLabel.textContent = 'Progreso: 0%'; wrap.appendChild(progressLabel);
+      var progressBar = d.createElement('div'); progressBar.className='progress'; var progI = d.createElement('i'); progressBar.appendChild(progI); wrap.appendChild(progressBar);
+
+      // modules list
+      var modules = parsed.modules || [];
+      var listWrap = d.createElement('div'); listWrap.id='moduleList'; left.appendChild(listWrap);
+
+      // right area: container for submodule view
+      var contentWrap = d.createElement('div'); contentWrap.id='contentWrap'; right.appendChild(contentWrap);
+
+      // close button
+      var closeBtn = d.createElement('button'); closeBtn.className='btn'; closeBtn.textContent='Cerrar'; closeBtn.style.marginTop='8px'; closeBtn.addEventListener('click', function(){ w.close(); }); left.appendChild(closeBtn);
+
+      // certificate button (disabled until course fully completed)
+      var certBtn = d.createElement('button'); certBtn.className='btn'; certBtn.textContent='Obtener certificado'; certBtn.style.marginTop='8px'; certBtn.style.marginLeft='8px'; certBtn.disabled = true;
+      certBtn.addEventListener('click', function(){ generateCertificateAndOpen(); }); left.appendChild(certBtn);
+
+      // (certificate button removed in this build)
+
+      shell.appendChild(left); shell.appendChild(right); wrap.appendChild(shell); body.appendChild(wrap);
+
+      // progress persistence (now includes attempts to record evaluation results)
+      var progressKey = 'prime_courses_progress';
+      function loadProgress(){ try{ var s = localStorage.getItem(progressKey); var obj = s?JSON.parse(s):{}; return obj[String(parsed.id)] || { passed: [], subIndex: {}, attempts: {} }; }catch(e){ return { passed: [], subIndex: {}, attempts: {} }; } }
+      function saveProgress(state){ try{ var s = localStorage.getItem(progressKey); var obj = s?JSON.parse(s):{}; obj[String(parsed.id)] = state; localStorage.setItem(progressKey, JSON.stringify(obj)); }catch(e){} }
+
+      var state = loadProgress(); var passed = state.passed || []; var subIndexMap = state.subIndex || {}; var attempts = state.attempts || {};
+
+      function updateProgressUI(){ var ok = passed.filter(Boolean).length; var pct = modules.length ? Math.round((ok/modules.length)*100) : 0; progressLabel.textContent = 'Progreso: '+pct+'%'; progI.style.width = pct + '%'; try{ certBtn.disabled = (pct < 100); }catch(e){} }
+
+      // When all modules are passed, allow generating a printable certificate
+      function generateCertificateAndOpen(){
+        try{
+          // local token generator (avoid depending on parent `uid`)
+          function genToken(){ return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,9); }
+          // ask for student name
+          var studentName = w.prompt('Nombre del alumno para el certificado:');
+          if(!studentName) { w.alert('Nombre no proporcionado. Cancelado.'); return; }
+          var token = genToken();
+          var cert = { token: token, student: String(studentName||'Alumno'), title: parsed.title || parsed.short_description || visibleTitle || 'Curso', courseId: parsed.id || null, issuedAt: (new Date()).toISOString(), signedBy: 'Prime Cursos' };
+          // store certificate in localStorage under `prime_certificates`
+          try{ var store = JSON.parse(localStorage.getItem('prime_certificates')||'{}'); store[token] = cert; localStorage.setItem('prime_certificates', JSON.stringify(store)); }catch(e){ console.error('save cert failed', e); }
+          // build certificate page URL (QR will point to the printable certificate page)
+          var certPageUrl = (location.origin || (location.protocol + '//' + location.host)) + '/prime-cursos/certificate_sample.html?token=' + encodeURIComponent(token) + '&student=' + encodeURIComponent(cert.student) + '&title=' + encodeURIComponent(cert.title) + '&issued=' + encodeURIComponent((new Date(cert.issuedAt)).toLocaleDateString());
+          var verifyUrl = certPageUrl;
+          // open printable certificate in a new window
+          var win = window.open('','_blank','width=900,height=700'); if(!win) { w.alert('Popup bloqueado al abrir certificado'); return; }
+          // Try to copy the verification URL to the clipboard and provide fallback (prompt/alert)
+          try{
+            if(window.navigator && navigator.clipboard && navigator.clipboard.writeText){
+              navigator.clipboard.writeText(verifyUrl).then(function(){
+                try{ w.alert('Enlace del certificado copiado al portapapeles:\n' + verifyUrl); }catch(e){ /* ignore */ }
+              }).catch(function(){
+                try{ w.prompt('Enlace del certificado (copiar):', verifyUrl); }catch(e){ try{ w.alert('Enlace del certificado:\n'+verifyUrl); }catch(er){} }
+              });
+            } else {
+              try{ w.prompt('Enlace del certificado (copiar):', verifyUrl); }catch(e){ try{ w.alert('Enlace del certificado:\n'+verifyUrl); }catch(er){} }
+            }
+          }catch(e){ try{ w.prompt('Enlace del certificado (copiar):', verifyUrl); }catch(er){ try{ w.alert('Enlace del certificado:\n'+verifyUrl); }catch(err){} } }
+          win.document.open();
+          win.document.write('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Certificado</title><style>body{font-family:Georgia,serif;background:#f7fbff;padding:30px;color:#062033} .card{max-width:820px;margin:0 auto;background:#fff;padding:30px;border-radius:10px;border:1px solid rgba(11,37,68,0.06)} .qr{width:130px;height:130px;border-radius:6px}</style></head><body></body></html>');
+          win.document.close();
+          var bd = win.document.body;
+          var card = win.document.createElement('div'); card.className = 'card';
+          var h2 = win.document.createElement('h2'); h2.textContent = 'Certificado de finalización'; card.appendChild(h2);
+          var p1 = win.document.createElement('p'); var s1 = win.document.createElement('strong'); s1.textContent = 'Alumno:'; p1.appendChild(s1); p1.appendChild(win.document.createTextNode(' ' + cert.student)); card.appendChild(p1);
+          var p2 = win.document.createElement('p'); var s2 = win.document.createElement('strong'); s2.textContent = 'Curso:'; p2.appendChild(s2); p2.appendChild(win.document.createTextNode(' ' + cert.title)); card.appendChild(p2);
+          var p3 = win.document.createElement('p'); var s3 = win.document.createElement('strong'); s3.textContent = 'Emitido:'; p3.appendChild(s3); p3.appendChild(win.document.createTextNode(' ' + (new Date(cert.issuedAt)).toLocaleString())); card.appendChild(p3);
+          var p4 = win.document.createElement('p'); var s4 = win.document.createElement('strong'); s4.textContent = 'Firma:'; p4.appendChild(s4); p4.appendChild(win.document.createTextNode(' ' + cert.signedBy)); card.appendChild(p4);
+          // Add supervisor signature block
+          var sig = win.document.createElement('div'); sig.style.marginTop = '18px'; sig.style.display = 'flex'; sig.style.flexDirection = 'column'; sig.style.alignItems = 'flex-end';
+          var sigTitle = win.document.createElement('div'); sigTitle.style.fontSize = '12px'; sigTitle.style.color = '#6b7280'; sigTitle.textContent = 'TEC. SUPERVISOR Y EXPERTO EN PRIME CURSOS';
+          // Insert a fictitious signature as an inline SVG data URL so no external assets are required
+          var sigImg = win.document.createElement('img');
+          sigImg.alt = 'Firma P. Oviedo';
+          sigImg.style.width = '240px';
+          sigImg.style.height = 'auto';
+          sigImg.style.marginTop = '6px';
+          // Simple SVG signature (stylized text) encoded as data URL
+          var svgSig = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 160">'
+            + '<rect width="100%" height="100%" fill="transparent"/>'
+            + '<text x="20" y="110" font-family="Brush Script MT, Pacifico, Great Vibes, cursive, Georgia" font-size="72" fill="#0b2433">Pablo O. Oviedo</text>'
+            + '</svg>';
+          try{
+            sigImg.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgSig);
+          }catch(e){
+            // fallback to a textual signature if encoding fails
+            sigImg.style.display = 'none';
+          }
+          var sigName = win.document.createElement('div'); sigName.style.fontFamily = 'Georgia, serif'; sigName.style.fontSize = '12px'; sigName.style.color = '#062033'; sigName.style.marginTop = '6px'; sigName.textContent = 'PABLO O. OVIEDO';
+          sig.appendChild(sigTitle); sig.appendChild(sigImg); sig.appendChild(sigName); card.appendChild(sig);
+          // Add a gold seal (estampa dorada) as an embedded SVG so no external asset is needed
+          try{
+            card.style.position = 'relative';
+            var stampImg = win.document.createElement('img');
+            stampImg.alt = 'Estampa dorada Prime Cursos';
+            stampImg.style.width = '120px';
+            stampImg.style.height = 'auto';
+            stampImg.style.position = 'absolute';
+            stampImg.style.right = '28px';
+            stampImg.style.top = '38px';
+            var svgStamp = '' +
+              '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">' +
+                '<defs>' +
+                  '<radialGradient id="g" cx="50%" cy="35%" r="65%">' +
+                    '<stop offset="0%" stop-color="#fff7d6"/>' +
+                    '<stop offset="40%" stop-color="#ffd966"/>' +
+                    '<stop offset="100%" stop-color="#c18b00"/>' +
+                  '</radialGradient>' +
+                '</defs>' +
+                '<circle cx="100" cy="100" r="90" fill="url(#g)"/>' +
+                '<circle cx="100" cy="100" r="70" fill="none" stroke="#f6d365" stroke-width="6"/>' +
+                '<text x="50%" y="54%" font-size="22" font-family="Georgia, serif" font-weight="700" fill="#3b2b00" text-anchor="middle">PRIME</text>' +
+                '<text x="50%" y="76%" font-size="12" font-family="Georgia, serif" fill="#3b2b00" text-anchor="middle">CURSOS</text>' +
+              '</svg>';
+            stampImg.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStamp);
+            card.appendChild(stampImg);
+          }catch(e){ /* non-fatal: continue without stamp */ }
+          var img = win.document.createElement('img'); img.className='qr'; img.src = 'https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=' + encodeURIComponent(verifyUrl); card.appendChild(img);
+          // verification link (same as QR target)
+          var vlink = win.document.createElement('div'); vlink.style.marginTop = '10px'; var averify = win.document.createElement('a'); averify.href = verifyUrl; averify.target = '_blank'; averify.textContent = verifyUrl; vlink.appendChild(averify); card.appendChild(vlink);
+          var printWrap = win.document.createElement('div'); printWrap.style.textAlign='right';
+          var a = win.document.createElement('a'); a.href='#'; a.className='print'; a.textContent='Imprimir'; a.style.background='#0b79d0'; a.style.color='#fff'; a.style.padding='8px 12px'; a.style.borderRadius='8px'; a.onclick = function(){ win.print(); return false; };
+          printWrap.appendChild(a); card.appendChild(printWrap);
+          bd.appendChild(card);
+        }catch(e){ console.error('generateCertificate error', e); w.alert('No se pudo generar el certificado: '+(e && e.message || e)); }
+      }
+
+      // certificate UI removed — placeholder
+
+      function renderModuleList(){ listWrap.innerHTML=''; modules.forEach(function(m,mi){ var item = d.createElement('div'); item.className='module'+(passed[mi] ? ' passed' : ''); if(mi>0 && !passed[mi-1]) item.className += ' locked'; item.style.borderBottom='1px solid #f0f4fb'; item.style.paddingBottom='8px'; var titleEl = d.createElement('div'); titleEl.textContent = ((mi+1)+'. '+(m.title||m.module_title||'Módulo')); titleEl.style.fontWeight='600'; item.appendChild(titleEl); var status = d.createElement('div'); status.className='muted'; status.textContent = passed[mi] ? 'Completado' : (mi>0 && !passed[mi-1] ? 'Bloqueado' : 'Disponible'); item.appendChild(status); item.addEventListener('click', function(){ if(mi>0 && !passed[mi-1]){ w.alert('Este módulo está bloqueado hasta completar el anterior'); return; } openModule(mi); }); listWrap.appendChild(item); }); updateProgressUI(); }
+
+      // show first available module
+      var startIdx = 0; for(var i=0;i<modules.length;i++){ if(i===0 || passed[i-1]){ startIdx=i; break; } }
+
+      // open module and set submodule index
+      function openModule(mi){ var m = modules[mi]||{}; var current = subIndexMap[mi] || 0; renderSubmodule(mi,current); }
+
+      function renderSubmodule(mi,si){ contentWrap.innerHTML=''; var m = modules[mi]||{}; var header = d.createElement('h3'); header.textContent = m.title || ('Módulo '+(mi+1)); contentWrap.appendChild(header);
+        var sm = (m.submodules && m.submodules.length) ? m.submodules : [];
+        if(sm.length===0){ var p = d.createElement('div'); p.textContent='No hay submódulos en este módulo.'; contentWrap.appendChild(p); // show evaluation
+          renderModuleEvaluation(mi); return; }
+        var s = sm[si] || {};
+        var subWrap = d.createElement('div'); subWrap.className='sub'; var st = d.createElement('div'); st.style.fontWeight='600'; st.textContent = ((mi+1)+'.'+(si+1))+' '+(s.title||''); subWrap.appendChild(st);
+        // Normalize content and attempt to detect a bare image URL inside the content
+        var contentText = (s.content && String(s.content||'').trim()) || '';
+        var imageUrl = (s.image && String(s.image||'').trim()) || null;
+        // If there is no explicit image, try to extract a URL-only line (or IMAGEN: line) that points to a common image file
+        if(!imageUrl && contentText){
+          try{
+            var m = contentText.match(/(?:^|\n)\s*(?:IMAGEN:\s*)?(https?:\/\/\S+?\.(?:png|jpe?g|gif|webp|svg)(?:\?[^\s]*)?)(?:\s*$|\n)/i);
+            if(m && m[1]){ imageUrl = m[1]; // remove the matched line from content to avoid showing the raw URL
+              contentText = contentText.replace(m[0],'').trim();
+            }
+          }catch(e){ /* ignore regex errors */ }
+        }
+        // Render image if we found one
+        if(imageUrl){ var im = d.createElement('img'); im.src = imageUrl; im.className='img-cover'; im.style.maxWidth='100%'; im.style.height='auto'; im.style.borderRadius='6px'; subWrap.appendChild(im);
+          // handle load errors gracefully: hide image and keep content as fallback
+          im.onerror = function(){ try{ im.style.display = 'none'; }catch(e){}; } }
+        // Render remaining textual content (if any)
+        if(contentText){ var cont = d.createElement('div'); cont.style.whiteSpace='pre-wrap'; cont.style.marginTop='8px'; cont.textContent = contentText; subWrap.appendChild(cont); }
+        contentWrap.appendChild(subWrap);
+        // navigation
+        var nav = d.createElement('div'); nav.style.marginTop='12px';
+        // Prev (Atrás) button for going to the previous submodule
+        if(si > 0){
+          var prevBtn = d.createElement('button'); prevBtn.className = 'btn'; prevBtn.textContent = 'Atrás'; prevBtn.style.marginRight = '8px';
+          prevBtn.addEventListener('click', function(){
+            // move to previous submodule index and persist
+            var newIndex = Math.max(0, si - 1);
+            subIndexMap[mi] = newIndex;
+            saveProgress({passed: passed, subIndex: subIndexMap});
+            renderSubmodule(mi, newIndex);
+          });
+          nav.appendChild(prevBtn);
+        }
+        var nextBtn = d.createElement('button'); nextBtn.className='btn'; nextBtn.textContent = (si < sm.length-1) ? 'Siguiente' : 'Ir a evaluación';
+        nextBtn.addEventListener('click', function(){ if(si < sm.length-1){ subIndexMap[mi] = si+1; saveProgress({passed:passed, subIndex:subIndexMap}); renderSubmodule(mi, si+1); } else { // show evaluation
+            renderModuleEvaluation(mi); } });
+        nav.appendChild(nextBtn);
+        // If this is the last submodule, provide a quick 'back to first' option in case the student gets stuck
+        if(si >= (sm.length - 1)){
+          var backFirst = d.createElement('button'); backFirst.className = 'btn'; backFirst.textContent = 'Atrás al primer submódulo'; backFirst.style.marginLeft = '8px';
+          backFirst.addEventListener('click', function(){ subIndexMap[mi] = 0; saveProgress({passed:passed, subIndex:subIndexMap}); renderSubmodule(mi, 0); });
+          nav.appendChild(backFirst);
+        }
+        contentWrap.appendChild(nav);
+      }
+
+      function renderModuleEvaluation(mi){ contentWrap.innerHTML=''; var m = modules[mi]||{}; var eh = d.createElement('h3'); eh.textContent = 'Evaluación — '+(m.title||('Módulo '+(mi+1))); contentWrap.appendChild(eh);
+        // Back buttons: allow student to go back to last viewed submodule or to the first submodule
+        var backBtn = d.createElement('button'); backBtn.className = 'btn'; backBtn.textContent = 'Atrás — Ver submódulos'; backBtn.style.marginBottom = '8px';
+        backBtn.addEventListener('click', function(){ var lastIndex = subIndexMap[mi] || 0; try{ renderSubmodule(mi, lastIndex); }catch(e){ try{ renderModuleList(); }catch(err){} } });
+        contentWrap.appendChild(backBtn);
+        var backFirstBtn = d.createElement('button'); backFirstBtn.className = 'btn'; backFirstBtn.textContent = 'Atrás al primer submódulo'; backFirstBtn.style.marginLeft = '8px'; backFirstBtn.style.marginBottom = '8px';
+        backFirstBtn.addEventListener('click', function(){ try{ subIndexMap[mi] = 0; saveProgress({passed:passed, subIndex:subIndexMap}); renderSubmodule(mi, 0); }catch(e){ renderModuleList(); } });
+        contentWrap.appendChild(backFirstBtn);
+        var ev = (m.evaluation && m.evaluation.length) ? m.evaluation : (parsed.evaluation && parsed.evaluation.length ? parsed.evaluation : []);
+        if(!ev.length){ var p = d.createElement('div'); p.textContent='No hay preguntas'; contentWrap.appendChild(p); var mark = d.createElement('button'); mark.className='btn'; mark.textContent='Marcar completado'; mark.addEventListener('click', function(){ passed[mi]=true; saveProgress({passed:passed, subIndex:subIndexMap}); renderModuleList(); updateProgressUI(); w.alert('Módulo marcado como completado'); }); contentWrap.appendChild(mark); return; }
+        var form = d.createElement('div'); ev.forEach(function(q,qi){ var qd = d.createElement('div'); qd.style.marginTop='8px'; var qh = d.createElement('div'); qh.style.fontWeight='600'; qh.textContent = q.question || ('Pregunta '+(qi+1)); qd.appendChild(qh); (q.options||[]).forEach(function(o){ var lab = d.createElement('label'); lab.style.display='block'; lab.style.marginTop='6px'; var inp = d.createElement('input'); inp.type='radio'; inp.name='q'+qi; inp.value = o.key; inp.style.marginRight='8px'; lab.appendChild(inp); var sp = d.createElement('span'); sp.textContent = ' '+o.key+') '+o.text; lab.appendChild(sp); qd.appendChild(lab); }); form.appendChild(qd); });
+        var sub = d.createElement('button'); sub.className='btn'; sub.textContent='Enviar evaluación'; sub.style.marginTop='12px'; sub.addEventListener('click', function(){
+          // Prevent multiple submissions if already completed
+          if(attempts[mi] && attempts[mi].completed){ w.alert('Ya has completado la evaluación de este módulo.'); return; }
+          var total = ev.length; var correct = 0; var answers = [];
+          for(var idx=0; idx<ev.length; idx++){
+            var sel = form.querySelector('input[name="q'+idx+'"]:checked');
+            var ans = ev[idx].answer;
+            if(!ans){ (ev[idx].options||[]).forEach(function(o){ if(/\*/.test(o.text||'')) ans = o.key; }); }
+            var selVal = sel ? String(sel.value).toUpperCase() : null;
+            answers.push(selVal);
+            if(selVal && ans && selVal === String(ans).toUpperCase()) correct++; }
+          var pct = total ? Math.round((correct/total)*100) : 0; var msg = 'Resultado: '+correct+'/'+total+' ('+pct+'%)';
+          // record attempt (final)
+          attempts[mi] = { completed: true, passed: (pct>=80), correct: correct, total: total, pct: pct, answers: answers, when: (new Date()).toISOString() };
+          state.passed = passed; state.subIndex = subIndexMap; state.attempts = attempts;
+          if(pct>=80){
+            // mark passed and update state
+            var prevCompleted = passed.filter(Boolean).length;
+            passed[mi]=true;
+            saveProgress(state);
+            renderModuleList();
+            updateProgressUI();
+            msg += ' — Aprobado';
+            // auto-open next module if exists
+            if(mi+1 < modules.length){ openModule(mi+1); }
+            // If this submission completed the last remaining module, auto-open certificate
+            try{
+              var newCompleted = passed.filter(Boolean).length;
+              if(modules.length && newCompleted === modules.length && prevCompleted !== modules.length){
+                // call certificate flow (will prompt for student name)
+                generateCertificateAndOpen();
+              }
+            }catch(e){ console.error('auto-open cert error', e); }
+          } else { saveProgress(state); msg += ' — No aprobado (80% requerido)'; }
+
+          // Visual feedback: mark options correct/incorrect and disable inputs
+          for(var qi=0; qi<ev.length; qi++){
+            var correctKey = ev[qi].answer || (function(){ var k=null; (ev[qi].options||[]).forEach(function(o){ if(/\*/.test(o.text||'')) k=o.key; }); return k; })();
+            var radios = form.querySelectorAll('input[name="q'+qi+'"][type=radio]');
+            radios.forEach(function(r){ var lab = r.parentNode; if(!lab) return; r.disabled = true; if(String(r.value).toUpperCase() === String(correctKey).toUpperCase()){ lab.style.background = '#e6ffef'; lab.style.borderRadius = '6px'; lab.style.padding = '4px'; } if(r.checked && String(r.value).toUpperCase() !== String(correctKey).toUpperCase()){ lab.style.background = '#ffe6e6'; lab.style.borderRadius = '6px'; lab.style.padding = '4px'; } });
+          }
+
+          w.alert(msg);
+        });
+        contentWrap.appendChild(form); contentWrap.appendChild(sub);
+
+        // Rehacer evaluación: permite reiniciar la evaluación para poder volver a intentarla
+        var redoBtn = d.createElement('button'); redoBtn.className = 'btn'; redoBtn.textContent = 'Rehacer evaluación'; redoBtn.style.marginTop = '12px'; redoBtn.style.marginLeft = '8px';
+        redoBtn.addEventListener('click', function(){
+          try{
+            // Clear any recorded attempt for this module and mark as not passed so user can retry
+            if(attempts && attempts[mi]){ delete attempts[mi]; } else { /* nothing to delete, still ensure state */ }
+            passed[mi] = false;
+            state.passed = passed; state.subIndex = subIndexMap; state.attempts = attempts;
+            saveProgress(state);
+            // Re-render evaluation UI to present fresh inputs
+            renderModuleEvaluation(mi);
+            renderModuleList(); updateProgressUI();
+            w.alert('Evaluación reiniciada. Ahora puedes volver a intentarla.');
+          }catch(e){ console.error('Error al rehacer evaluación', e); w.alert('No se pudo reiniciar la evaluación: '+(e && e.message || e)); }
+        });
+        contentWrap.appendChild(redoBtn);
+      }
+
+      // Initial render and state
+      renderModuleList(); openModule(startIdx); updateProgressUI();
+
+      // Certificate generation and printable view removed in this build
+
+      load();
+      if(/debug=1/.test(location.search)) { window._pc = { parseCoursePlain: parseCoursePlain }; }
+      } // end openStudentView
+    // Certificate validation handler (admin UI)
+    var btn = document.getElementById('validateCert');
+    var input = document.getElementById('certToken');
+    if(btn && input){
+      btn.addEventListener('click', function(){
+        var token = (input.value||'').trim();
+        if(!token) return alert('Pega el token del certificado en el campo');
+        try{
+          var store = JSON.parse(localStorage.getItem('prime_certificates')||'{}');
+          var cert = store[token];
+          if(!cert){ alert('Certificado NO encontrado'); return; }
+          var w = window.open('','_blank','width=900,height=700'); if(!w) return alert('Popup bloqueado');
+          // build printable validation page via DOM
+          w.document.open();
+          w.document.write('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Validación de certificado</title><style>body{font-family:Georgia,serif;background:#f7fbff;padding:30px;color:#062033} .card{max-width:820px;margin:0 auto;background:#fff;padding:30px;border-radius:10px;border:1px solid rgba(11,37,68,0.06)} .qr{width:130px;height:130px;border-radius:6px}</style></head><body></body></html>');
+          w.document.close();
+          var bd = w.document.body;
+          var card = w.document.createElement('div'); card.className = 'card';
+          var h2 = w.document.createElement('h2'); h2.textContent = 'Certificado válido'; card.appendChild(h2);
+          var p1 = w.document.createElement('p'); p1.innerHTML = '<strong>Alumno:</strong> '+escapeHtml(cert.student); card.appendChild(p1);
+          var p2 = w.document.createElement('p'); p2.innerHTML = '<strong>Curso:</strong> '+escapeHtml(cert.title); card.appendChild(p2);
+          var p3 = w.document.createElement('p'); p3.innerHTML = '<strong>Emitido:</strong> '+escapeHtml((new Date(cert.issuedAt)).toLocaleString()); card.appendChild(p3);
+          var p4 = w.document.createElement('p'); p4.innerHTML = '<strong>Firma:</strong> '+escapeHtml(cert.signedBy); card.appendChild(p4);
+          var img = w.document.createElement('img'); img.className='qr'; img.src = 'https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl='+encodeURIComponent(cert.token); card.appendChild(img);
+          var printWrap = w.document.createElement('div'); printWrap.style.textAlign='right';
+          var a = w.document.createElement('a'); a.href='#'; a.className='print'; a.textContent='Imprimir'; a.style.background='#0b79d0'; a.style.color='#fff'; a.style.padding='8px 12px'; a.style.borderRadius='8px'; a.onclick = function(){ w.print(); return false; };
+          printWrap.appendChild(a); card.appendChild(printWrap);
+          bd.appendChild(card);
+        }catch(e){ alert('Error validando: '+(e && e.message || e)); }
+      });
+    }
+
+    // Refresh UI when other windows modify courses/progress/certificates in localStorage
+    try{
+      window.addEventListener('storage', function(e){
+        if(!e || !e.key) return;
+        if(e.key === storageKey || e.key === 'prime_courses_progress' || e.key === 'prime_certificates'){
+          try{ load(); }catch(err){}
+        }
+      });
+    }catch(e){}
+  })();
+  </script>
+  <script>
+  (function(){
+    // Safe cleanup: remove any <link rel="preload"> with an empty or clearly invalid href
+    try{
+      document.addEventListener('DOMContentLoaded', function(){
+        var removed = 0;
+        var nodes = document.querySelectorAll('link[rel="preload"], link[rel~="preload"]');
+        nodes.forEach(function(el){
+          try{
+            var h = el.getAttribute('href');
+            var invalid = false;
+            if(!h || !h.trim()) invalid = true;
+            else if(/undefined|null|^data:,$/i.test(h)) invalid = true;
+            else if(/^javascript:/i.test(h)) invalid = true;
+            else if(!/^(\/|\.\/|\.\.\/|https?:\/\/|\/\/|data:)/i.test(h)) invalid = true;
+            if(invalid){ el.remove(); removed++; }
+          }catch(e){ /* ignore per-node errors */ }
+        });
+        if(removed && window.console && console.info) console.info('admin.fixed2.html: removed invalid preload links:', removed);
+      });
+    }catch(e){ /* nothing to do */ }
+  })();
+  </script>
+</body>
+</html>

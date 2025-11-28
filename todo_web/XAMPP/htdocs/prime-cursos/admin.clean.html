@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Prime Cursos — Admin (clean)</title>
+  <style>
+    :root{--bg:#0f1720;--panel:#071224;--muted:#89a0b3;--accent:#0b79d0}
+    body{margin:0;font-family:Inter,system-ui,Segoe UI,Arial;background:var(--bg);color:#e6eef8}
+    .wrap{max-width:960px;margin:18px auto;padding:18px}
+    .card{background:rgba(255,255,255,0.02);padding:12px;border-radius:8px;margin-bottom:12px}
+    textarea,input,button{font:inherit}
+    textarea,input{width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    .btn{display:inline-block;padding:8px 12px;border-radius:8px;border:0;background:var(--accent);color:#fff}
+    .muted{color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Prime <strong>Cursos</strong> — Admin (clean)</h1>
+
+    <section class="card">
+      <h3>Importar curso (texto plano)</h3>
+      <p class="muted">Pega el texto plano. Marca la opción correcta con <code>*</code>.</p>
+      <textarea id="raw" rows="8" placeholder="Pega el texto del curso aquí"></textarea>
+      <div style="margin-top:8px">
+        <button id="preview" class="btn">Previsualizar</button>
+        <button id="import" class="btn" style="background:#0ca87b;margin-left:8px">Importar</button>
+      </div>
+      <div id="previewArea" style="display:none;margin-top:12px"></div>
+    </section>
+
+    <section class="card">
+      <h3>Cursos (localStorage)</h3>
+      <div id="list"></div>
+    </section>
+  </div>
+
+  <script>
+  (function(){
+    var storageKey = 'prime_courses';
+    var courses = [];
+    function load(){ try{ var s=localStorage.getItem(storageKey); courses = s? JSON.parse(s):[]; }catch(e){ courses=[]; } renderList(); }
+    function save(){ try{ localStorage.setItem(storageKey, JSON.stringify(courses)); }catch(e){} }
+    function parseCoursePlain(text){ var lines = String(text||'').split(/\r?\n/).map(l=>l.trim()); var course={id:Date.now(),title:'',category:'',short_description:'',description:'',price:0,image:null,modules:[],evaluation:[]}; var curMod=null,curSub=null,mode=''; for(var i=0;i<lines.length;i++){ var L=lines[i]; if(!L) continue; if(/^TITULO:\s*/i.test(L)){ course.title=L.replace(/^TITULO:\s*/i,'').trim(); continue;} if(/^CATEGORIA:\s*/i.test(L)){ course.category=L.replace(/^CATEGORIA:\s*/i,'').trim(); continue;} if(/^DESCRIPCION_CORTA:\s*/i.test(L)){ course.short_description=L.replace(/^DESCRIPCION_CORTA:\s*/i,'').trim(); continue;} if(/^DESCRIPCION:\s*/i.test(L)){ course.description+=(course.description?'\n':'')+L.replace(/^DESCRIPCION:\s*/i,'').trim(); mode='description'; continue;} if(/^PRECIO:\s*/i.test(L)){ course.price=parseFloat(L.replace(/^PRECIO:\s*/i,'').replace(',','.'))||0; continue;} var m=L.match(/^MODULO:\s*(?:[0-9\.]+)?\s*-?\s*(.*)$/i); if(m){ curMod={title:(m[1]||'Módulo'),submodules:[],evaluation:[]}; course.modules.push(curMod); curSub=null; mode='modules'; continue;} var s=L.match(/^SUBMODULO:\s*(?:[0-9\.]+)?\s*-?\s*(.*)$/i); if(s){ curSub={title:(s[1]||'Sub'),content:'',image:null}; if(!curMod){ curMod={title:'Módulo 1',submodules:[],evaluation:[]}; course.modules.push(curMod);} curMod.submodules.push(curSub); mode='sub'; continue;} if(/^CONTENIDO:\s*/i.test(L)){ var v=L.replace(/^CONTENIDO:\s*/i,'').trim(); if(curSub) curSub.content+=(curSub.content?'\n':'')+v; else course.description+=(course.description?'\n':'')+v; continue;} if(/^\+EVALUACION\+/i.test(L)||/^EVALUACION/i.test(L)){ mode='eval'; continue;} if(mode==='eval'&&/^P:\s*/i.test(L)){ var q=L.replace(/^P:\s*/i,'').trim(); var opts=[]; var ans=null; var j=i+1; for(;j<lines.length;j++){ var nx=lines[j]; if(!nx) break; var mo=nx.match(/^([A-D])[\)\:]\s*(.*)$/i); if(!mo) break; var key=mo[1], txt=mo[2]||''; if(/\*/.test(txt)){ txt=txt.replace(/\*/g,'').trim(); ans=key;} opts.push({key:key,text:txt}); } course.evaluation.push({question:q,options:opts,answer:ans}); i=j-1; continue;} if(mode==='description') course.description+=(course.description?'\n':'')+L; else if(mode==='sub'&&curSub) curSub.content+=(curSub.content?'\n':'')+L;} if(!course.short_description&&course.description) course.short_description=course.description.split('\n').join(' ').slice(0,160); return course; }
+    function renderList(){ var el=document.getElementById('list'); el.innerHTML=''; if(!courses.length){ el.innerHTML='<div class="muted">No hay cursos importados</div>'; return;} courses.forEach(function(c){ var row=document.createElement('div'); row.style.padding='8px'; row.style.borderBottom='1px solid rgba(255,255,255,0.02)'; row.innerHTML='<strong>'+escapeHtml(c.title||'(sin título)')+'</strong> <span class="muted">'+escapeHtml(c.category||'')+'</span>'; var btn=document.createElement('button'); btn.textContent='Ver alumno'; btn.className='btn'; btn.style.marginLeft='8px'; btn.addEventListener('click',function(){ openStudentView(c); }); row.appendChild(btn); el.appendChild(row); }); }
+    function escapeHtml(s){ return String(s||'').replace(/[&<>]/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[m];}); }
+    document.getElementById('preview').addEventListener('click', function(){ var raw=document.getElementById('raw').value||''; if(!raw.trim()){ alert('Pega texto'); return; } var parsed=parseCoursePlain(raw); renderPreview(parsed); });
+    document.getElementById('import').addEventListener('click', function(){ var raw=document.getElementById('raw').value||''; if(!raw.trim()){ alert('Pega texto'); return; } var parsed=parseCoursePlain(raw); courses.push(parsed); save(); renderList(); document.getElementById('raw').value=''; alert('Curso importado'); });
+    function renderPreview(parsed){ var area=document.getElementById('previewArea'); area.style.display='block'; area.innerHTML=''; var h=document.createElement('div'); h.innerHTML='<strong>'+escapeHtml(parsed.title||'(sin título)')+'</strong> <div class="muted">'+escapeHtml(parsed.category||'')+'</div>'; area.appendChild(h); var btn=document.createElement('button'); btn.className='btn'; btn.textContent='Ver como alumno'; btn.style.marginTop='8px'; btn.addEventListener('click',function(){ openStudentView(parsed); }); area.appendChild(btn); var dbg=document.createElement('pre'); dbg.style.marginTop='8px'; dbg.style.background='rgba(0,0,0,0.04)'; dbg.style.padding='8px'; dbg.textContent = JSON.stringify(parsed,null,2); area.appendChild(dbg); }
+    function openStudentView(parsed){ var w=window.open('','_blank','width=1000,height=720'); if(!w) return alert('Popup bloqueado'); var d=w.document; d.open(); d.write('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+escapeHtml(parsed.title||'Curso')+'</title></head><body></body></html>'); d.close(); var style=d.createElement('style'); style.textContent = `\n        body{font-family:Inter,system-ui,Segoe UI,Arial;margin:18px;background:#f7fbff;color:#032431}\n        .shell{max-width:1100px;margin:0 auto;display:flex;gap:18px}\n        .sidebar{width:300px;padding:16px;background:#fff;border-radius:10px}\n        .main{flex:1;padding:16px;background:#fff;border-radius:10px}\n        .module{padding:10px;border-radius:8px;margin-bottom:8px}\n        .btn{display:inline-block;padding:8px 12px;background:#0b79d0;color:#fff;border-radius:8px;border:0}\n      `; d.head.appendChild(style); var body=d.body; var shell=d.createElement('div'); shell.className='shell'; var sidebar=d.createElement('div'); sidebar.className='sidebar'; var main=d.createElement('div'); main.className='main'; var title=d.createElement('h2'); title.textContent=parsed.title||'Curso'; sidebar.appendChild(title); var modules=parsed.modules||[]; modules.forEach(function(m,mi){ var el=d.createElement('div'); el.className='module'; el.textContent=((mi+1)+'. '+(m.title||m.module_title||'Módulo')); el.addEventListener('click',function(){ renderModule(mi); }); sidebar.appendChild(el); }); shell.appendChild(sidebar); shell.appendChild(main); body.appendChild(shell); var current=0,passed=[]; function renderModule(i){ main.innerHTML=''; var m=modules[i]||{}; var h=d.createElement('h3'); h.textContent=m.module_title||m.title||('Módulo '+(i+1)); main.appendChild(h); (m.submodules||[]).forEach(function(s,si){ var sdiv=d.createElement('div'); var st=d.createElement('div'); st.textContent=((i+1)+'.'+(si+1))+' '+(s.title||''); sdiv.appendChild(st); if(s.content){ var p=d.createElement('div'); p.style.whiteSpace='pre-wrap'; p.textContent=s.content; sdiv.appendChild(p); } main.appendChild(sdiv); }); renderEvaluationFor(m,i); } function renderEvaluationFor(m,mi){ var ev=(m.evaluation&&m.evaluation.length)?m.evaluation:parsed.evaluation||[]; var wrap=d.createElement('div'); wrap.style.marginTop='12px'; var h=d.createElement('h4'); h.textContent='Evaluación'; wrap.appendChild(h); if(!ev.length){ var p=d.createElement('div'); p.textContent='No hay preguntas'; wrap.appendChild(p); var ok=d.createElement('button'); ok.className='btn'; ok.textContent='Marcar aprobado'; ok.addEventListener('click',function(){ passed[mi]=true; updateProgress(); d.alert('Módulo aprobado'); }); wrap.appendChild(ok); main.appendChild(wrap); return; } var form=d.createElement('div'); ev.forEach(function(q,qi){ var qd=d.createElement('div'); qd.style.marginTop='8px'; var qh=d.createElement('div'); qh.textContent=q.question||('Pregunta '+(qi+1)); qd.appendChild(qh); (q.options||[]).forEach(function(o){ var lab=d.createElement('label'); var inp=d.createElement('input'); inp.type='radio'; inp.name='q'+qi; inp.value=o.key; lab.appendChild(inp); var sp=d.createElement('span'); sp.textContent=' '+o.key+') '+o.text; lab.appendChild(sp); qd.appendChild(lab); }); form.appendChild(qd); }); var sub=d.createElement('button'); sub.className='btn'; sub.textContent='Enviar'; sub.style.marginTop='8px'; sub.addEventListener('click',function(){ var total=ev.length,correct=0; for(var i=0;i<ev.length;i++){ var sel=form.querySelector('input[name="q'+i+'"]:checked'); var ans=ev[i].answer; if(!ans){ (ev[i].options||[]).forEach(function(o){ if(/\*/.test(o.text||'')) ans=o.key; }); } if(sel&&ans&&sel.value.toUpperCase()===ans.toUpperCase()) correct++; } var pct=total?Math.round((correct/total)*100):0; d.alert('Resultado: '+correct+'/'+total+' ('+pct+'%)'); if(pct>=80){ passed[0]=true; updateProgress(); } }); wrap.appendChild(form); wrap.appendChild(sub); main.appendChild(wrap); } function updateProgress(){ var ok=passed.filter(Boolean).length; var pct=modules.length?Math.round((ok/modules.length)*100):0; }
+    load(); window._pc={parseCoursePlain:parseCoursePlain};
+  })();
+  </script>
+</body>
+</html>

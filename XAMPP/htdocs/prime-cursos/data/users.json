@@ -1,0 +1,19 @@
+[
+    {
+        "id": "user_9b80a7b5a40f",
+        "email": "pablooviedo58@gmail.com",
+        "name": "Pablo Oviedo",
+        "password_hash": "$2y$10$ZjdyHSi4ui6ebZy8L2XbLelYGyMSKKbWewlw09e1vB9y6kwdN5dRK",
+        "created_at": "2025-11-26T21:36:22+01:00",
+        "via": "email"
+    }
+    ,
+    {
+        "id": "user_admin_0001",
+        "email": "admin@primecursos.org",
+        "name": "Administrator",
+        "password_hash": "$2y$10$kdAnWPcxJAtypUnRUFBl4.ydFalkXBFNdKtZQUYvy4892SzYTSD2e",
+        "created_at": "2025-11-26T22:00:00+01:00",
+        "via": "email"
+    }
+]

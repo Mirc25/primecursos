@@ -1,0 +1,34 @@
+## Ignore common OS, editor and build artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+*.tmp
+*.bak
+*.zip
+
+# Node/Python/Composer
+node_modules/
+venv/
+env/
+vendor/
+
+# XAMPP / local dev sensitive files
+**/passwords.txt
+**/properties.ini
+**/xampp-control.ini
+
+# Deployment temp dirs
+tmp_deploy/
+public_html-backup*
+
+# Composer / lock files that can be regenerated
+composer.lock
+# Ignore local sensitive config files
+prime-cursos-config*.php
+
+# Typical XAMPP/htdocs temporary files
+/Dockerfile
+/node_modules/
+.env

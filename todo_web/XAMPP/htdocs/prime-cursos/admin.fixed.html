@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin — Prime Cursos (fixed)</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <style> /* small helper styles to keep demo tidy */
+    body{font-family:Inter,system-ui,Segoe UI,Arial;margin:0;background:#0f1720;color:#e6eef8}
+    .container{max-width:980px;margin:18px auto;padding:18px}
+    .card{background:rgba(255,255,255,0.02);padding:12px;border-radius:8px;margin-bottom:12px}
+    textarea,input,select{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.04);color:#fff}
+    .primary{background:#0b79d0;color:#fff;padding:8px 12px;border-radius:6px;border:none}
+    .muted{color:#9fb0c8}
+  </style>
+</head>
+<body>
+  <header style="padding:12px 18px;border-bottom:1px solid rgba(255,255,255,0.03)">
+    <div class="container"><h1 style="margin:0">Prime <strong>Cursos</strong> — Admin</h1></div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2 style="margin-top:0">Importar / Previsualizar curso plano</h2>
+      <p class="muted">Pega el texto plano del curso. El parser extrae título, módulos, submódulos y evaluación marcada con <code>*</code> en la opción correcta.</p>
+      <textarea id="rawCourse" rows="8" style="width:100%;padding:10px;border-radius:8px"></textarea>
+      <div style="margin-top:8px">
+        <button id="previewBtn" class="primary">Previsualizar</button>
+        <button id="importBtn" class="primary" style="background:#0ca87b;margin-left:8px">Importar</button>
+      </div>
+      <div id="importPreview" style="display:none;margin-top:12px"></div>
+    </section>
+
+    <section class="card">
+      <h3 style="margin-top:0">Cursos en demo (localStorage)</h3>
+      <div id="adminCourses"></div>
+    </section>
+
+    <!-- Simple editor modal (hidden) -->
+    <div id="courseEditor" style="display:none;position:fixed;left:12px;right:12px;top:12px;bottom:12px;background:#071224;padding:12px;border-radius:8px;overflow:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 id="editorTitle">Editor</h3>
+        <div><button id="closeEditor" class="primary" style="background:#cf3d3d">Cerrar</button></div>
+      </div>
+      <div style="margin-top:8px">
+        <label>Título<br><input id="edit_title" style="width:100%;padding:8px;border-radius:6px"></label>
+        <label style="display:block;margin-top:8px">Descripción<br><textarea id="edit_description" rows="4" style="width:100%;padding:8px;border-radius:6px"></textarea></label>
+        <div style="margin-top:8px"><button id="saveEditor" class="primary">Guardar</button></div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  // Minimal, well-formed admin script — avoids building large HTML+<script> strings
+  (function(){
+    var storageKey = 'prime_courses';
+    var adminList = [];
+    var lastParsed = null; // used to provide data to popup via opener.getParsedCourse
+
+    function loadCourses(){
+      try{ var s = localStorage.getItem(storageKey); if(s) return JSON.parse(s); }catch(e){}
+      return [];
+    }
+    function saveCourses(){ try{ localStorage.setItem(storageKey, JSON.stringify(adminList)); }catch(e){} }
+
+    function idFor(item){ if(!item.id) item.id = Date.now()%1000000; return item.id; }
+
+    function renderAdminList(){
+      var el = document.getElementById('adminCourses'); el.innerHTML='';
+      if(!adminList.length){ el.innerHTML = '<div class="muted">No hay cursos — importa uno para empezar.</div>'; return; }
+      adminList.forEach(function(c){
+        var d = document.createElement('div'); d.className='card';
+        d.style.display = 'flex'; d.style.gap = '12px'; d.style.alignItems = 'flex-start';
+
+        // thumbnail (left)
+        var thumbWrap = document.createElement('div'); thumbWrap.style.width = '120px'; thumbWrap.style.flex = '0 0 120px';
+        var imgSrc = c.image || c.img || null;
+        if(imgSrc){ var img = document.createElement('img'); img.src = imgSrc; img.style.width='120px'; img.style.height='80px'; img.style.objectFit='cover'; img.style.borderRadius='6px'; thumbWrap.appendChild(img); }
+        d.appendChild(thumbWrap);
+
+        // main content
+        var main = document.createElement('div'); main.style.flex = '1';
+        var title = document.createElement('div'); title.innerHTML = '<strong>'+escapeHtml(c.title||'(sin título)')+'</strong>';
+        var cat = document.createElement('div'); cat.className = 'muted'; cat.textContent = c.category || '';
+        main.appendChild(title); main.appendChild(cat);
+
+        var sdText = c.short_description || (c.description? (c.description.replace(/\s+/g,' ').trim().substr(0,160) + (c.description.length>160? '...' : '')) : '');
+        if(sdText){ var sd = document.createElement('div'); sd.style.marginTop='6px'; sd.textContent = sdText; main.appendChild(sd); }
+
+        if(c.description){ var details = document.createElement('details'); details.style.marginTop='6px'; var summary = document.createElement('summary'); summary.textContent = 'Descripción completa'; details.appendChild(summary); var dd = document.createElement('div'); dd.style.whiteSpace='pre-wrap'; dd.style.marginTop='6px'; dd.textContent = c.description; details.appendChild(dd); main.appendChild(details); }
+
+        // actions
+        var actions = document.createElement('div'); actions.style.marginTop = '8px';
+        var openBtn = document.createElement('button'); openBtn.className='openBtn'; openBtn.textContent='Vista alumno'; openBtn.style.marginRight='6px'; openBtn.style.background='#0b79d0'; openBtn.style.color='#fff'; openBtn.style.border='none'; openBtn.style.padding='6px 10px'; openBtn.style.borderRadius='6px';
+        var editBtn = document.createElement('button'); editBtn.className='editBtn'; editBtn.textContent='Editar'; editBtn.style.marginRight='6px';
+        var delBtn = document.createElement('button'); delBtn.className='delBtn'; delBtn.textContent='Eliminar'; delBtn.style.color = '#f66';
+        actions.appendChild(openBtn); actions.appendChild(editBtn); actions.appendChild(delBtn);
+        main.appendChild(actions);
+
+        d.appendChild(main);
+        el.appendChild(d);
+
+        delBtn.addEventListener('click', function(){ adminList = adminList.filter(function(x){ return x.id !== c.id; }); saveCourses(); renderAdminList(); });
+        editBtn.addEventListener('click', function(){ openEditor(c.id); });
+        openBtn.addEventListener('click', function(){ openStudentView2(c); });
+      });
+    }
+
+    function escapeHtml(s){ if(!s) return ''; return String(s).replace(/[&<>]/g, function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;'}[m]; }); }
+
+    // Simple parser for the provided plain format (extended)
+    function parseCoursePlain(text){
+      var rawText = String(text||'');
+      var remaining = rawText;
+      var course = { id: Date.now()%1000000, title:'', category:'', short_description:'', description:'', price:0, image:null, modules:[], evaluation:[] };
+      if(rawText.indexOf('\n') === -1 || rawText.split(/\r?\n/).length === 1){
+        try{
+          var headerRe = function(name){ return new RegExp(name+':\\s*([\\s\\S]*?)(?=(?:TITULO:|CATEGORIA:|DESCRIPCION_CORTA:|DESCRIPCION:|PRECIO:|MODULO:|SUBMODULO:|\\+EVALUACION\\+|$))','i'); };
+          var h_title = (rawText.match(headerRe('TITULO'))||[])[1] || '';
+          var h_cat = (rawText.match(headerRe('CATEGORIA'))||[])[1] || '';
+          var h_short = (rawText.match(headerRe('DESCRIPCION_CORTA'))||[])[1] || '';
+          var h_desc = (rawText.match(headerRe('DESCRIPCION'))||[])[1] || '';
+          var h_price = (rawText.match(headerRe('PRECIO'))||[])[1] || '';
+          var mpos = rawText.search(/MODULO:/i);
+          if(mpos >= 0) remaining = rawText.slice(mpos);
+          else remaining = '';
+          course.title = (h_title||'').trim();
+          course.category = (h_cat||'').trim();
+          course.short_description = (h_short||'').trim();
+          course.description = (h_desc||'').trim();
+          course.price = parseFloat((h_price||'').replace(',','.'))||0;
+          try{
+            if(!course.description && course.title && course.title.length > 80){
+              var pMatch = course.title.match(/\bPRECIO:\s*([0-9]+(?:[\.,][0-9]+)?)/i);
+              if(pMatch && pMatch[1]){ course.price = parseFloat(pMatch[1].replace(',','.'))||course.price; course.title = course.title.replace(pMatch[0],'').trim(); }
+              var splitPos = course.title.indexOf('. ', 40);
+              if(splitPos > 0){ var tpart = course.title.slice(0, splitPos+1).trim(); var dpart = course.title.slice(splitPos+2).trim(); if(dpart){ course.title = tpart; course.description = dpart; } }
+            }
+          }catch(e){}
+        }catch(e){ }
+      }
+      var lines = String(remaining || rawText||'').split(/\r?\n/).map(function(l){ return l.replace(/\t/g,' ').trim(); });
+      var curMod = null, curSub = null, mode='';
+      for(var i=0;i<lines.length;i++){
+        var L = lines[i]; if(L===undefined) continue; var raw = L;
+        if(L === '') { continue; }
+        if(/^TITULO:\s*/i.test(L)){ course.title = L.replace(/^TITULO:\s*/i,'').trim(); continue; }
+        if(/^CATEGORIA:\s*/i.test(L)){ course.category = L.replace(/^CATEGORIA:\s*/i,'').trim(); continue; }
+        if(/^DESCRIPCION_CORTA:\s*/i.test(L)){ course.short_description = L.replace(/^DESCRIPCION_CORTA:\s*/i,'').trim(); continue; }
+        if(/^DESCRIPCION:\s*/i.test(L)){ course.description += (course.description? '\n' : '') + L.replace(/^DESCRIPCION:\s*/i,'').trim(); mode='description'; continue; }
+        if(/^PRECIO:\s*/i.test(L)){ course.price = parseFloat(L.replace(/^PRECIO:\s*/i,'').trim())||0; continue; }
+
+        var mMatch = L.match(/^MODULO:\s*([0-9]+(?:\.[0-9]+)?)?\.?\s*-?\s*(.*)$/i);
+        if(mMatch){ var mnum = mMatch[1] || (course.modules.length+1); var mtitle = (mMatch[2]||'').trim() || ('Módulo '+mnum); curMod = { module_number: mnum, module_title: mtitle, submodules: [], evaluation: [] }; course.modules.push(curMod); curSub = null; mode='modules'; continue; }
+
+        var sMatch = L.match(/^SUBMODULO:\s*([0-9]+(?:\.[0-9]+)?)?\.?\s*-?\s*(.*)$/i);
+        if(sMatch){ var snum = sMatch[1] || ((curMod? (curMod.submodules.length+1) : (course.modules.length+1))+'' ); var stitle = (sMatch[2]||'').trim() || ('Sub '+snum); curSub = { submodule_number: snum, title: stitle, content:'', image: null }; if(!curMod){ curMod = { module_number: course.modules.length+1, module_title:'Módulo '+(course.modules.length+1), submodules: [] }; course.modules.push(curMod); } curMod.submodules.push(curSub); mode='submodule'; continue; }
+
+        if(/^(IMAGEN|IMAGE):\s*/i.test(L)){
+          var v = L.replace(/^(IMAGEN|IMAGE):\s*/i,'').trim(); if(v==='<>') v = ''; if(curSub){ curSub.image = v||null; } else { course.image = v||null; } continue;
+        }
+
+        if(/^CONTENIDO:\s*/i.test(L)){ var v = L.replace(/^CONTENIDO:\s*/i,'').trim(); if(curSub){ curSub.content += (curSub.content? '\n' : '') + v; } else { course.description += (course.description? '\n' : '') + v; } mode='submodule'; continue; }
+
+        if(/^\+EVALUACION\+/i.test(L) || /^EVALUACION/i.test(L)){ mode='evaluation'; continue; }
+        if(mode==='evaluation' && /^P:\s*/i.test(L)){
+          var q = L.replace(/^P:\s*/i,'').trim(); var opts = []; var ans=null; var j=i+1;
+          for(;j<lines.length;j++){ var nx = lines[j]; if(!nx) break; var mo = nx.match(/^([A-D])[\)\:]\s*(.*)$/); if(!mo) break; var key=mo[1], txt=mo[2]||''; var isCorrect = /\*/.test(txt); if(isCorrect) txt = txt.replace(/\*/g,'').trim(); opts.push({key:key,text:txt}); if(isCorrect) ans=key; }
+          i = j-1; var qobj = { question:q, options:opts, answer:ans }; if(curMod){ curMod.evaluation = curMod.evaluation || []; curMod.evaluation.push(qobj); } else { course.evaluation.push(qobj); } continue;
+        }
+
+        if(mode==='description'){ course.description += (course.description? '\n' : '') + raw; }
+        else if(mode==='submodule' && curSub){ curSub.content += (curSub.content? '\n' : '') + raw; }
+      }
+      try{
+        if(!course.description && course.title && course.title.length > 80){
+          var pMatchT = course.title.match(/\bPRECIO:\s*([0-9]+(?:[\.,][0-9]+)?)/i);
+          if(pMatchT && pMatchT[1]){ course.price = parseFloat(pMatchT[1].replace(',','.'))||course.price; course.title = course.title.replace(pMatchT[0],'').trim(); }
+          var splitPosT = course.title.indexOf('. ', 40);
+          if(splitPosT > 0){ var tpart = course.title.slice(0, splitPosT+1).trim(); var dpart = course.title.slice(splitPosT+2).trim(); if(dpart){ course.title = tpart; course.description = dpart; } }
+        }
+      }catch(e){}
+
+      try{
+        if(course.description && /\bPRECIO:\s*([0-9]+(?:[\.,][0-9]+)?)/i.test(course.description)){
+          var pm = course.description.match(/\bPRECIO:\s*([0-9]+(?:[\.,][0-9]+)?)/i);
+          if(pm && pm[1]){
+            course.price = parseFloat(pm[1].replace(',','.')) || course.price;
+            course.description = course.description.replace(pm[0],'').trim();
+          }
+        }
+      }catch(e){}
+
+      if(!course.short_description && course.description){
+        var txt = course.description.replace(/\s+/g,' ').trim();
+        course.short_description = txt.length > 160 ? txt.substr(0,157).trim() + '...' : txt;
+      }
+
+      return course;
+    }
+
+    // UI wiring
+    function addCourseToList(course){
+      course.id = course.id || Date.now()%1000000;
+      course.title = course.title || course.titulo || '';
+      course.category = course.category || course.categoria || '';
+      course.short_description = course.short_description || course.short_desc || course.desc || '';
+      course.description = course.description || course.desc || '';
+      course.image = course.image || course.img || null;
+      console.log('Adding course to list:', course);
+      adminList.push(course);
+      saveCourses();
+      renderAdminList();
+    }
+
+    document.getElementById('importBtn').addEventListener('click', function(){ var raw = document.getElementById('rawCourse').value||''; if(!raw.trim()){ alert('Pega el texto del curso'); return; } var parsed = parseCoursePlain(raw); addCourseToList(parsed); document.getElementById('rawCourse').value=''; alert('Curso importado'); });
+
+    document.getElementById('previewBtn').addEventListener('click', function(){ var raw = document.getElementById('rawCourse').value||''; if(!raw.trim()){ alert('Pega el texto para previsualizar'); return; } var parsed = parseCoursePlain(raw); lastParsed = parsed; renderImportPreview(parsed); });
+
+    function renderImportPreview(parsed){
+      var p = document.getElementById('importPreview'); p.style.display='block'; p.innerHTML=''; p._parsed = parsed;
+
+      var hdr = document.createElement('div'); hdr.style.display='flex'; hdr.style.gap='12px'; hdr.style.flexWrap='wrap';
+      var ti = document.createElement('input'); ti.value = parsed.title||''; ti.style.flex='1'; ti.placeholder='Título'; ti.addEventListener('input', function(){ parsed.title = ti.value; });
+      var ca = document.createElement('input'); ca.value = parsed.category||''; ca.placeholder='Categoría'; ca.style.width='240px'; ca.addEventListener('input', function(){ parsed.category = ca.value; });
+      var pr = document.createElement('input'); pr.value = parsed.price||0; pr.type='number'; pr.step='0.01'; pr.style.width='140px'; pr.addEventListener('input', function(){ parsed.price = parseFloat(pr.value)||0; });
+      hdr.appendChild(ti); hdr.appendChild(ca); hdr.appendChild(pr);
+      p.appendChild(hdr);
+
+      var sd = document.createElement('div'); sd.style.marginTop = '8px';
+      var sdLabel = document.createElement('label'); sdLabel.textContent = 'Descripción corta'; sdLabel.style.display = 'block';
+      var sdBr = document.createElement('br');
+      var sdInput = document.createElement('input'); sdInput.style.width = '100%'; sdInput.style.padding = '6px'; sdInput.style.borderRadius = '6px'; sdInput.value = parsed.short_description || '';
+      sdInput.addEventListener('input', function(){ parsed.short_description = sdInput.value; });
+      sdLabel.appendChild(sdBr); sdLabel.appendChild(sdInput); sd.appendChild(sdLabel); p.appendChild(sd);
+
+      var desc = document.createElement('div'); desc.style.marginTop = '8px';
+      var descLabel = document.createElement('label'); descLabel.textContent = 'Descripción larga'; descLabel.style.display = 'block';
+      var descBr = document.createElement('br');
+      var descTa = document.createElement('textarea'); descTa.style.width = '100%'; descTa.style.padding = '6px'; descTa.style.borderRadius = '6px'; descTa.style.minHeight = '80px'; descTa.rows = 6; descTa.value = parsed.description || '';
+      descTa.addEventListener('input', function(){ parsed.description = descTa.value; });
+      descLabel.appendChild(descBr); descLabel.appendChild(descTa); desc.appendChild(descLabel); p.appendChild(desc);
+
+      try{ console.log('DEBUG parsed for preview:', parsed); }catch(e){}
+      try{
+        var dbg = document.createElement('div'); dbg.style.marginTop='8px'; dbg.style.padding='8px'; dbg.style.background='rgba(0,0,0,0.06)'; dbg.style.borderRadius='6px'; var ta = document.createElement('textarea'); ta.style.width='100%'; ta.style.height='140px'; ta.style.fontFamily='monospace'; ta.value = JSON.stringify(parsed, null, 2); ta.readOnly = true; dbg.appendChild(ta); p.appendChild(dbg);
+      }catch(e){}
+
+      var coverWrap = document.createElement('div'); coverWrap.style.marginTop='8px';
+      coverWrap.innerHTML = '<label>Portada (pegar imagen o pegar URL)<br><input id="pv_image_url" style="width:100%;padding:6px;border-radius:6px" placeholder="Pega URL de portada (no se guarda hasta Import)"></label>';
+      var imgPreview = document.createElement('div'); imgPreview.style.marginTop = '8px'; imgPreview.style.minHeight = '80px'; imgPreview.style.border = '1px dashed rgba(255,255,255,0.04)'; imgPreview.style.padding = '8px'; imgPreview.style.display = 'flex'; imgPreview.style.alignItems = 'center'; imgPreview.style.justifyContent = 'center'; imgPreview.textContent = 'Pega la imagen aquí (Ctrl+V) para previsualizar'; imgPreview.tabIndex = 0;
+      coverWrap.appendChild(imgPreview);
+      p.appendChild(coverWrap);
+      var imageInput = coverWrap.querySelector('#pv_image_url'); if(parsed.image) imageInput.value = parsed.image;
+      function setCoverPreview(src){ imgPreview.innerHTML = ''; var im = document.createElement('img'); im.src = src; im.style.maxWidth='220px'; im.style.maxHeight='120px'; im.style.borderRadius='6px'; imgPreview.appendChild(im); parsed._coverPreview = src; }
+      imageInput.addEventListener('input', function(){ var v = this.value.trim(); if(v){ setCoverPreview(v); } else { parsed._coverPreview = null; imgPreview.innerHTML = 'Pega la imagen aquí (Ctrl+V) para previsualizar'; } });
+      imgPreview.addEventListener('paste', function(e){
+        var items = (e.clipboardData || window.clipboardData).items || [];
+        for(var k=0;k<items.length;k++){ var it = items[k]; if(it.kind === 'file' && it.type.indexOf('image')===0){ var file = it.getAsFile(); var reader = new FileReader(); reader.onload = function(ev){ setCoverPreview(ev.target.result); }; reader.readAsDataURL(file); e.preventDefault(); return; } }
+        var txt = (e.clipboardData || window.clipboardData).getData('text'); if(txt){ imageInput.value = txt.trim(); setCoverPreview(txt.trim()); e.preventDefault(); }
+      });
+      imageInput.addEventListener('paste', function(e){ var txt = (e.clipboardData || window.clipboardData).getData('text'); if(txt){ setCoverPreview(txt.trim()); } });
+
+      var mods = document.createElement('div'); mods.style.marginTop='12px'; mods.innerHTML = '<strong>Módulos</strong>';
+      (parsed.modules||[]).forEach(function(m,mi){
+        var mcard = document.createElement('div'); mcard.style.border='1px solid rgba(255,255,255,0.03)'; mcard.style.padding='8px'; mcard.style.marginTop='8px';
+        var mtitle = document.createElement('input'); mtitle.value = m.module_title||('Módulo '+(mi+1)); mtitle.style.fontWeight='700'; mtitle.style.width='70%'; mtitle.addEventListener('input', function(){ m.module_title = this.value; p._parsed = parsed; });
+        mcard.appendChild(mtitle);
+        var subWrap = document.createElement('div'); subWrap.style.marginTop='8px';
+        (m.submodules||[]).forEach(function(s,si){
+          var sdiv = document.createElement('div'); sdiv.style.borderTop='1px dashed rgba(255,255,255,0.03)'; sdiv.style.padding='8px 0';
+          var st = document.createElement('input'); st.value = s.title||('Sub '+(si+1)); st.style.width='60%'; st.addEventListener('input', function(){ s.title = this.value; p._parsed = parsed; });
+          var img = document.createElement('input'); img.value = s.image||''; img.placeholder='Imagen (URL)'; img.style.marginLeft='8px'; img.style.width='30%'; img.addEventListener('input', function(){ s.image = this.value||null; p._parsed = parsed; });
+          var ta = document.createElement('textarea'); ta.value = s.content||''; ta.style.display='block'; ta.style.width='100%'; ta.style.marginTop='6px'; ta.rows=4; ta.addEventListener('input', function(){ s.content = this.value; p._parsed = parsed; });
+          sdiv.appendChild(st); sdiv.appendChild(img); sdiv.appendChild(ta); subWrap.appendChild(sdiv);
+        });
+        mcard.appendChild(subWrap);
+        mods.appendChild(mcard);
+      });
+      p.appendChild(mods);
+
+      if(parsed.evaluation && parsed.evaluation.length){
+        var ev = document.createElement('div'); ev.style.marginTop='12px'; ev.innerHTML = '<strong>Evaluación (preguntas)</strong>';
+        parsed.evaluation.forEach(function(q,qi){ var qd = document.createElement('div'); qd.style.marginTop='6px'; qd.innerHTML = '<div style="font-weight:700">'+escapeHtml(q.question||'')+'</div>'; (q.options||[]).forEach(function(o){ var li = document.createElement('div'); li.textContent = o.key + ') ' + o.text + (q.answer===o.key? '  ✓' : ''); qd.appendChild(li); }); ev.appendChild(qd); }); p.appendChild(ev);
+      }
+
+      var actions = document.createElement('div'); actions.style.marginTop='12px';
+      var savePreviewBtn = document.createElement('button'); savePreviewBtn.className='primary'; savePreviewBtn.textContent='Guardar cambios en previsualización'; savePreviewBtn.addEventListener('click', function(){ lastParsed = parsed; alert('Cambios guardados en la previsualización'); });
+      var importBtn = document.createElement('button'); importBtn.className='primary'; importBtn.style.marginLeft='8px'; importBtn.textContent='Importar curso (guardar)'; importBtn.addEventListener('click', function(){
+        if(parsed._coverPreview) parsed.image = parsed._coverPreview;
+        else if(imageInput && imageInput.value) parsed.image = imageInput.value.trim() || null;
+        adminList.push(parsed); saveCourses(); renderAdminList(); p.style.display='none'; document.getElementById('rawCourse').value=''; alert('Curso importado');
+      });
+      var viewAsStudentBtn = document.createElement('button'); viewAsStudentBtn.className='pc-btn'; viewAsStudentBtn.textContent = 'Ver como alumno'; viewAsStudentBtn.style.marginLeft='8px'; viewAsStudentBtn.addEventListener('click', function(){ openStudentView2(parsed); });
+      actions.appendChild(savePreviewBtn); actions.appendChild(importBtn); p.appendChild(actions);
+      actions.appendChild(viewAsStudentBtn);
+    }
+
+    function openEditor(id){ var course = adminList.find(function(x){ return x.id===id; }); if(!course) return alert('Curso no encontrado'); document.getElementById('editorTitle').textContent = 'Editor — '+(course.title||''); document.getElementById('edit_title').value = course.title||''; document.getElementById('edit_description').value = course.description||''; document.getElementById('courseEditor').style.display='block'; }
+    document.getElementById('closeEditor').addEventListener('click', function(){ document.getElementById('courseEditor').style.display='none'; });
+    document.getElementById('saveEditor').addEventListener('click', function(){ var t = document.getElementById('edit_title').value.trim(); var d = document.getElementById('edit_description').value.trim(); var course = adminList[0]; // for demo simplicity we save to first item in list if editing
+      var found = adminList.find(function(x){ return x.title===document.getElementById('editorTitle').textContent.replace(/^Editor — /,''); }); if(found){ found.title = t; found.description = d; saveCourses(); renderAdminList(); document.getElementById('courseEditor').style.display='none'; alert('Guardado'); } else { alert('No se pudo guardar (demo)'); }
+    });
+
+    // Popup student view: DOM-based, safe — Glamour student interface with sidebar, module-complete view and progress
+    function openStudentView2(parsed){
+      lastParsed = parsed;
+      var w = window.open('','prime_student','width=1100,height=760'); if(!w) return alert('No se pudo abrir la ventana del alumno (popup bloqueado)');
+      try{
+        var doc = w.document; doc.open();
+        doc.write('<!doctype html><html><head><meta charset="utf-8"><title>'+escapeHtml(parsed.title||'Curso')+'</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body></body></html>');
+        doc.close();
+
+        // Glamour styles (cleaned and enhanced) - using template literal to avoid quoting/escaping problems
+        var style = doc.createElement('style');
+        style.textContent = `
+          :root{--accent:#0b79d0;--accent-2:#0fa1d6;--muted:#68707a;--bg:#eef6fb}
+          body{font-family:Inter,system-ui,'Segoe UI',Arial;margin:0;color:#0b2433;background:linear-gradient(180deg,#f6fbff 0%, #eef6fb 100%)}
+          .pc-shell{display:flex;gap:20px;max-width:1200px;margin:22px auto;padding:22px}
+          .pc-sidebar{width:320px;background:linear-gradient(180deg,#ffffff,#fbfdff);border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(16,24,40,0.06);border:1px solid rgba(11,121,208,0.06)}
+          .pc-main{flex:1;background:linear-gradient(180deg,#ffffff 0%, #fbfdff 100%);border-radius:12px;padding:20px;box-shadow:0 10px 30px rgba(16,24,40,0.08)}
+          .pc-hero{display:flex;justify-content:space-between;align-items:center;gap:12px}
+          .pc-title{font-size:20px;font-weight:800;color:var(--accent)}
+          .pc-subtitle{color:var(--muted);font-size:13px}
+          .pc-progress{height:12px;background:linear-gradient(90deg, rgba(11,121,208,0.06), rgba(15,161,214,0.04));border-radius:999px;overflow:hidden;margin-top:12px}
+          .pc-progress > i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-2));width:0%;box-shadow:0 4px 12px rgba(11,121,208,0.12)}
+          .module-item{padding:12px;border-radius:10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:all .18s ease;border-left:4px solid transparent;background:linear-gradient(180deg,#fff,#fbfdff)}
+          .module-item:hover{transform:translateY(-3px);box-shadow:0 8px 20px rgba(16,24,40,0.06);border-left-color:var(--accent)}
+          .module-item.locked{opacity:0.45}
+          .module-item .m-info{display:flex;flex-direction:column}
+          .module-item .m-title{font-weight:700}
+          .module-item .m-sub{font-size:12px;color:var(--muted)}
+          .pc-card{padding:18px;border-radius:14px;background:linear-gradient(180deg,#ffffff,#fbfdff);border:1px solid rgba(14,68,120,0.03)}
+          .pc-content h2{margin:0 0 12px 0}
+          .pc-submodule{border-top:1px dashed rgba(14,68,120,0.06);padding:14px 0}
+          .pc-actions{display:flex;gap:10px;margin-top:12px}
+          .btn{padding:10px 14px;border-radius:10px;border:1px solid rgba(2,6,23,0.06);background:#fff;cursor:pointer}
+          .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+        `;
+        doc.head.appendChild(style);
+
+        var body = doc.body;
+        var shell = doc.createElement('div'); shell.className='pc-shell';
+        var sidebar = doc.createElement('aside'); sidebar.className='pc-sidebar';
+        var main = doc.createElement('section'); main.className='pc-main';
+
+        // Sidebar hero
+        var hero = doc.createElement('div'); hero.className='pc-hero';
+        var t = doc.createElement('div'); t.className='pc-title'; t.textContent = parsed.title || 'Curso';
+        var sc = doc.createElement('div'); sc.style.textAlign='right'; var subt = doc.createElement('div'); subt.className='pc-subtitle'; subt.textContent = parsed.category || ''; sc.appendChild(subt);
+        hero.appendChild(t); hero.appendChild(sc); sidebar.appendChild(hero);
+
+        var progressWrap = doc.createElement('div'); progressWrap.style.marginTop='8px';
+        var pbar = doc.createElement('div'); pbar.className='pc-progress'; var pfill = doc.createElement('i'); pbar.appendChild(pfill); progressWrap.appendChild(pbar); sidebar.appendChild(progressWrap);
+
+        var moduleList = doc.createElement('div'); moduleList.style.marginTop='12px'; sidebar.appendChild(moduleList);
+
+        var card = doc.createElement('div'); card.className='pc-card'; var cardInner = doc.createElement('div'); cardInner.className='pc-content'; card.appendChild(cardInner); main.appendChild(card);
+
+        var actionRow = doc.createElement('div'); actionRow.className='pc-actions'; actionRow.style.justifyContent='flex-end';
+        var viewFullBtn = doc.createElement('button'); viewFullBtn.className='btn'; viewFullBtn.textContent = 'Ver módulo completo';
+        var closeBtn = doc.createElement('button'); closeBtn.className='btn'; closeBtn.textContent = 'Cerrar'; closeBtn.addEventListener('click', function(){ w.close(); });
+        actionRow.appendChild(viewFullBtn); actionRow.appendChild(closeBtn); main.insertBefore(actionRow, card);
+
+        shell.appendChild(sidebar); shell.appendChild(main); body.appendChild(shell);
+
+        var modules = (parsed.modules||[]).map(function(m){ return JSON.parse(JSON.stringify(m||{})); });
+        var totalModules = modules.length || 0; var currentModule = 0; var currentSub = 0; var passed = new Array(totalModules).fill(false);
+
+        function updateGlobalProgress(){ var done = passed.filter(Boolean).length; var pct = totalModules? Math.round((done/totalModules)*100) : 0; pfill.style.width = pct+'%'; return pct; }
+
+        function renderSidebar(){ moduleList.innerHTML=''; modules.forEach(function(m,mi){ var it = doc.createElement('div'); it.className = 'module-item '+((mi>0 && !passed[mi-1])? 'locked':'' ); it.dataset.index = mi; var minfo = doc.createElement('div'); minfo.className='m-info'; var mt = doc.createElement('div'); mt.className='m-title'; mt.textContent = (mi+1)+'. '+(m.module_title||('Módulo '+(mi+1))); var ms = doc.createElement('div'); ms.className='m-sub'; ms.textContent = (m.submodules? m.submodules.length : 0)+' lecciones'; minfo.appendChild(mt); minfo.appendChild(ms); it.appendChild(minfo); var badge = doc.createElement('div'); badge.textContent = passed[mi]? 'Aprobado' : ((mi>0 && !passed[mi-1])? 'Bloqueado' : 'Disponible'); badge.style.fontSize='12px'; badge.style.color= passed[mi]? '#0b7' : '#666'; it.appendChild(badge); it.addEventListener('click', function(){ var idx = parseInt(this.dataset.index,10); if(idx>0 && !passed[idx-1]){ alert('Debes aprobar el módulo anterior para acceder.'); return; } openModule(idx); }); moduleList.appendChild(it); }); }
+
+        function renderMain(){ cardInner.innerHTML = ''; if(!modules.length){ cardInner.textContent = 'No hay módulos en la previsualización.'; return; }
+          var m = modules[currentModule]; var h = doc.createElement('h2'); h.textContent = (currentModule+1)+'. '+(m.module_title||('Módulo '+(currentModule+1))); cardInner.appendChild(h);
+          if(viewFullBtn._showFull){ // show all submodules sequentially
+            (m.submodules||[]).forEach(function(s,si){ var sd = doc.createElement('div'); sd.className='pc-submodule'; var st = doc.createElement('div'); st.style.fontWeight='700'; st.textContent = ((currentModule+1)+'.'+(si+1))+ ' ' + (s.title||''); sd.appendChild(st); if(s.content){ var sc = doc.createElement('div'); sc.style.whiteSpace='pre-wrap'; sc.style.marginTop='8px'; sc.textContent = s.content; sd.appendChild(sc); } if(s.image){ var im = doc.createElement('img'); im.src = s.image; im.style.maxWidth='480px'; im.style.display='block'; im.style.marginTop='8px'; sd.appendChild(im); } cardInner.appendChild(sd); });
+            renderEvaluation();
+            return;
+          }
+
+          var subs = m.submodules || [];
+          if(subs.length){ var s = subs[currentSub]; var sd = doc.createElement('div'); sd.className='pc-submodule'; var st = doc.createElement('div'); st.style.fontWeight='800'; st.textContent = ((currentModule+1)+'.'+(currentSub+1))+ ' ' + (s.title||''); sd.appendChild(st); if(s.content){ var sc = doc.createElement('div'); sc.style.whiteSpace='pre-wrap'; sc.style.marginTop='8px'; sc.textContent = s.content; sd.appendChild(sc); } if(s.image){ var im = doc.createElement('img'); im.src = s.image; im.style.maxWidth='480px'; im.style.display='block'; im.style.marginTop='8px'; sd.appendChild(im); } cardInner.appendChild(sd);
+            var nav = doc.createElement('div'); nav.className='pc-actions'; var prev = doc.createElement('button'); prev.className='btn'; prev.textContent='Anterior'; prev.disabled = (currentModule===0 && currentSub===0); prev.addEventListener('click', function(){ if(currentSub>0){ currentSub--; } else if(currentModule>0){ currentModule--; currentSub = (modules[currentModule].submodules||[]).length-1; } renderMain(); });
+            var next = doc.createElement('button'); next.className='btn primary'; next.textContent = (currentSub < subs.length-1)? 'Siguiente' : 'Finalizar módulo'; next.addEventListener('click', function(){ if(currentSub < subs.length-1){ currentSub++; renderMain(); } else { renderEvaluation(); } }); nav.appendChild(prev); nav.appendChild(next); cardInner.appendChild(nav);
+          } else { renderEvaluation(); }
+        }
+
+        function renderEvaluation(){ // show evaluation area for current module
+          var m = modules[currentModule]; var ev = (m.evaluation && m.evaluation.length)? m.evaluation : (parsed.evaluation && parsed.evaluation.length? parsed.evaluation : []);
+          var evWrap = doc.createElement('div'); evWrap.style.marginTop='14px'; var title = doc.createElement('h3'); title.textContent = 'Evaluación'; evWrap.appendChild(title);
+          if(!ev.length){ var nod = doc.createElement('div'); nod.textContent = 'No hay preguntas en este módulo.'; evWrap.appendChild(nod); var auto = doc.createElement('button'); auto.className='btn primary'; auto.style.marginTop='10px'; auto.textContent='Marcar aprobado'; auto.addEventListener('click', function(){ passed[currentModule]=true; updateGlobalProgress(); renderSidebar(); if(currentModule < modules.length-1){ currentModule++; currentSub=0; renderMain(); } else { alert('Has finalizado el curso.'); } }); evWrap.appendChild(auto); cardInner.appendChild(evWrap); return; }
+          var form = doc.createElement('form'); ev.forEach(function(q,qi){ var qw = doc.createElement('div'); qw.style.marginTop='8px'; var qh = doc.createElement('div'); qh.style.fontWeight='700'; qh.textContent = q.question || ('Pregunta '+(qi+1)); qw.appendChild(qh); var options = q.options && q.options.length? q.options.slice() : []; if(!options.length){ var parts = (q.question||'').split(/\s([A-D])\)\s*/g); if(parts && parts.length>1){ var idx=1; while(idx<parts.length){ var key = parts[idx]; var val = parts[idx+1]||''; options.push({key:key,text: val.replace(/\*/g,'').trim()}); idx+=2; } } }
+            var name = 'q_'+currentModule+'_'+qi; options.forEach(function(o){ var lab = doc.createElement('label'); lab.style.display='block'; var inp = doc.createElement('input'); inp.type='radio'; inp.name = name; inp.value = o.key; lab.appendChild(inp); var span = doc.createElement('span'); span.textContent = ' ' + (o.key||'') + ') ' + (o.text||''); lab.appendChild(span); qw.appendChild(lab); }); form.appendChild(qw); });
+          var submit = doc.createElement('button'); submit.type='button'; submit.className='btn primary'; submit.style.marginTop='12px'; submit.textContent='Enviar'; form.appendChild(submit); var feedback = doc.createElement('div'); feedback.style.marginTop='10px'; form.appendChild(feedback); evWrap.appendChild(form); cardInner.appendChild(evWrap);
+          submit.addEventListener('click', function(){ var total = ev.length; var correct = 0; for(var i=0;i<ev.length;i++){ var name = 'q_'+currentModule+'_'+i; var sel = form.querySelector('input[name="'+name+'"]:checked'); var q = ev[i]; var expected = q.answer || null; if(!expected){ if(q.options && q.options.length){ for(var z=0;z<q.options.length;z++){ if(/\*/.test(q.options[z].text||'')){ expected = q.options[z].key; break; } } } if(!expected){ var m = (q.question||'').match(/\*\s*([A-D])/); if(m && m[1]) expected = m[1]; } } var given = sel? sel.value : null; if(expected && given && expected.toUpperCase() === given.toUpperCase()){ correct++; } }
+            var pct = total? Math.round((correct/total)*100) : 0; feedback.textContent = 'Resultado: ' + correct + '/' + total + ' ('+pct+'%)'; if(pct >= 80){ feedback.textContent += ' — Aprobado'; passed[currentModule]=true; updateGlobalProgress(); renderSidebar(); var btn = doc.createElement('button'); btn.className='btn primary'; btn.style.marginTop='10px'; btn.textContent = currentModule < modules.length-1? 'Ir al siguiente módulo' : 'Finalizar curso'; btn.addEventListener('click', function(){ if(currentModule < modules.length-1){ currentModule++; currentSub=0; renderMain(); } else { alert('Curso completado. ¡Felicidades!'); } }); cardInner.appendChild(btn); } else { feedback.textContent += ' — No alcanza 80% — Reintenta.'; } });
+        }
+
+        function openModule(idx){ currentModule = idx; currentSub = 0; renderMain(); }
+
+        viewFullBtn.addEventListener('click', function(){ viewFullBtn._showFull = !viewFullBtn._showFull; viewFullBtn.textContent = viewFullBtn._showFull? 'Ver submódulos' : 'Ver módulo completo'; renderMain(); });
+
+        renderSidebar(); updateGlobalProgress(); renderMain();
+
+        try{ w.getParsedCourse = function(){ return parsed; }; }catch(e){}
+      }catch(err){ console.error('openStudentView2 error', err); alert('Error en vista alumno: '+(err && err.message)); }
+    }
+
+    window.getParsedCourse = function(){ return lastParsed; };
+
+    adminList = loadCourses(); renderAdminList();
+  })();
+  </script>
+</body>
+</html>

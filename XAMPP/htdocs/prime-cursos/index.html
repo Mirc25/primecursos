@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Prime Cursos — Tienda</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="logo">Prime <span>Cursos</span></h1>
+      <div class="header-actions">
+        <input id="searchInput" placeholder="Buscar cursos, p.ej. 'JavaScript'" style="padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);width:300px;max-width:40vw;margin-right:12px">
+        <nav>
+          <a href="admin.php" class="admin-btn" style="margin-right:10px;background:transparent;border:1px solid rgba(255,255,255,0.06);color:#fff;padding:8px 10px;border-radius:8px;text-decoration:none">Administrar</a>
+          <a href="login.html" class="register-btn" style="margin-right:10px;background:var(--accent);color:#fff;padding:8px 10px;border-radius:8px;text-decoration:none;display:inline-block">Registro</a>
+          <button id="cartBtn" aria-label="Ver carrito">Carrito (<span id="cartCount">0</span>)</button>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div class="hero-banner">
+        <div class="hero-left">
+          <h1>Aprende con cursos prácticos que realmente funcionan
+            <span class="hero-rotator" aria-hidden="true">
+              <span class="word active">Aprende.</span>
+              <span class="word">Crea.</span>
+              <span class="word">Destaca.</span>
+            </span>
+          </h1>
+          <div class="lead"> contenido diseñado por instructores reales — proyectos, plantillas y soporte paso a paso.</div>
+          <div class="hero-cta">
+            <a class="primary" href="index.html#courses">Explorar cursos</a>
+            <a class="ghost" href="login.html">Regístrate</a>
+          </div>
+        </div>
+        <div class="hero-right">
+          <div id="heroImg" class="hero-illustration" role="img" aria-label="Ilustración de cursos">
+            <!-- Inline fallback SVG (ensures visible illustration even si fetch falla) -->
+            <svg viewBox="0 0 720 480" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <rect x="36" y="28" rx="14" ry="14" width="648" height="384" fill="#071427" opacity="0.9"/>
+              <g transform="translate(80,60)">
+                <rect x="0" y="0" rx="14" ry="14" width="560" height="320" fill="url(#screenGrad)"/>
+                <rect x="264" y="24" width="260" height="170" rx="12" ry="12" fill="#7c3aed"/>
+                <rect x="28" y="26" width="220" height="120" rx="10" ry="10" fill="#fff" opacity="0.03"/>
+                <rect x="28" y="132" width="220" height="120" rx="10" ry="10" fill="#fff" opacity="0.02"/>
+              </g>
+            </svg>
+          </div>
+        </div>
+        <div class="hero-decor" aria-hidden="true"></div>
+      </div>
+    </section>
+
+    <!-- Registro CTA -->
+    <section class="cta-section">
+      <div class="container">
+        <div class="cta-inner">
+          <div class="cta-text">
+            <h3>¿Aún no tienes una cuenta?</h3>
+            <p>Regístrate ahora para acceder a tus cursos y gestionar tus compras.</p>
+          </div>
+          <div class="cta-action">
+            <a class="primary" href="login.html">Registro</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Slider de destacados (eliminado) -->
+
+    <section>
+      <div id="courses" class="grid"></div>
+    </section>
+  </main>
+
+  <!-- Cart Modal -->
+  <div id="cartModal" class="modal" aria-hidden="true">
+    <div class="modal-content">
+      <button id="closeCart" class="close">×</button>
+      <h3>Carrito</h3>
+      <div id="cartItems"></div>
+      <div class="cart-footer">
+        <div>Total: <strong id="cartTotal">$0.00</strong></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="checkoutBtn" class="primary">Pagar (simulado)</button>
+          <button id="mpCheckoutBtn" class="brand-btn brand-mp small" title="Pagar con Mercado Pago">
+            <img src="assets/img/mercadopago.svg" alt="Mercado Pago">
+            <span>Pagar con Mercado Pago</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">© Prime Cursos Tec. Pablo Oviedo 2019</div>
+  </footer>
+
+  <script src="assets/data.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+  // Hero rotator: simple cycle through words with fade
+  (function(){
+    var idx = 0;
+    var container = document.querySelector('.hero-rotator');
+    if(!container) return;
+    var words = Array.from(container.querySelectorAll('.word'));
+    function show(n){ words.forEach(function(w,i){ w.classList.toggle('active', i===n); }); }
+    setInterval(function(){ idx = (idx+1) % words.length; show(idx); }, 2200);
+    // subtle stagger on load
+    setTimeout(function(){ show(0); }, 100);
+  })();
+  // Randomize hero illustration (choose between provided SVGs) and inline it for reliable rendering
+  (function(){
+    var imgs = ['assets/img/hero-illustration-1.svg','assets/img/hero-illustration-2.svg'];
+    var container = document.getElementById('heroImg');
+    var banner = document.querySelector('.hero-banner');
+    if(!container) return;
+
+    // First, check for a realistic photo provided locally at several possible paths (jpg/png/svg)
+    var photoCandidates = ['assets/img/hero-photo.jpg','assets/img/hero-photo.png','assets/img/hero-photo.svg'];
+    function tryInlineSvgFallback(){
+      var pick = imgs[Math.floor(Math.random()*imgs.length)];
+      fetch(pick).then(function(res){ if(!res.ok) throw new Error('HTTP '+res.status); return res.text(); }).then(function(svgText){
+        try{ container.innerHTML = svgText; container.setAttribute('aria-hidden','false'); }
+        catch(e){ container.textContent = ''; container.style.backgroundImage = 'url('+pick+')'; }
+      }).catch(function(){
+        container.innerHTML = '<svg viewBox="0 0 360 240" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#0b1220" rx="10"/><text x="50%" y="50%" fill="#fff" font-size="20" text-anchor="middle" alignment-baseline="middle">Ilustración no disponible</text></svg>';
+      });
+    }
+
+    // Option 1 selected: force a fixed Unsplash image as hero background
+    (function(){
+      // Use a local high-resolution colorful SVG as the hero background
+      var fixedUrl = 'assets/img/hero-photo-highres.svg';
+      try{
+        banner.classList.add('has-photo');
+        banner.style.backgroundImage = 'url("'+fixedUrl+'")';
+        banner.style.backgroundSize = 'cover';
+        banner.style.backgroundPosition = 'center right';
+      }catch(e){ tryInlineSvgFallback(); }
+    })();
+  })();
+  </script>
+  <script>
+  (function(){
+      function cleanTitle(raw){
+        try{ var t = String(raw||'').replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim(); if(t.length>80) t = t.slice(0,80)+'…'; return t; }catch(e){ return String(raw||'').slice(0,80); }
+      }
+    function renderCourses(){
+      var container = document.getElementById('courses');
+      if(!container) return;
+      var raw = localStorage.getItem('prime_courses');
+      if(!raw){
+        container.innerHTML = '<p>No hay cursos guardados aún.</p>';
+        return;
+      }
+      try{
+        var list = JSON.parse(raw) || [];
+        if(!Array.isArray(list) || list.length===0){
+          container.innerHTML = '<p>No hay cursos guardados aún.</p>';
+          return;
+        }
+        container.innerHTML = '';
+        list.forEach(function(c){
+          var card = document.createElement('article');
+          card.className = 'card';
+          // link to course page (if needed)
+          var idVal = c.id || c.uid || c._id || c.slug || c.title || '';
+          var link = document.createElement('a');
+          link.href = 'course_view.php?id=' + encodeURIComponent(idVal);
+          link.style = 'color:inherit;text-decoration:none;display:block';
+
+          // media (image) if available
+          var titleTxt = cleanTitle(c.title || c.short_description || '');
+          var media = null;
+          if(c.image || c.img){
+            media = document.createElement('div');
+            media.className = 'card-media';
+            var img = document.createElement('img');
+            img.src = c.image || c.img || '';
+            img.alt = c.title || 'Curso';
+            img.style.cssText = 'width:100%;height:140px;object-fit:cover;border-radius:6px 6px 0 0;display:block';
+            media.appendChild(img);
+            link.appendChild(media);
+          }
+
+          var body = document.createElement('div');
+          body.className = 'card-body';
+          body.style.padding = '12px';
+
+          // Create title and price elements
+          var titleEl = document.createElement('h4'); titleEl.className='title'; titleEl.textContent = titleTxt;
+          var priceVal = (c.price !== undefined && c.price !== null) ? Number(c.price) : null;
+          var priceSpan = document.createElement('div');
+          priceSpan.className = 'price';
+          if(priceVal !== null && !isNaN(priceVal)){
+            var d = Number(c.discount_pct || 0);
+            if(d > 0){
+              var final = priceVal * (1 - (d/100));
+              priceSpan.innerHTML = '<del style="color:rgba(255,255,255,0.7);margin-right:6px">$' + priceVal.toFixed(2) + '</del><strong>$' + final.toFixed(2) + '</strong>';
+            } else {
+              priceSpan.textContent = '$' + priceVal.toFixed(2);
+            }
+          } else { priceSpan.textContent = ''; }
+
+          if(media){
+            // When there's an image, place only the price as an overlay on the image
+            var priceOverlay = document.createElement('div');
+            priceOverlay.className = 'price-overlay';
+            priceOverlay.appendChild(priceSpan);
+            media.appendChild(priceOverlay);
+
+            // Title stays below the image inside the card body
+            var titleRow = document.createElement('div');
+            titleRow.className = 'title-row';
+            titleRow.appendChild(titleEl);
+            body.appendChild(titleRow);
+          } else {
+            // No image: show title and price together in meta-row
+            var metaRow = document.createElement('div');
+            metaRow.className = 'meta-row';
+            metaRow.appendChild(titleEl);
+            metaRow.appendChild(priceSpan);
+            body.appendChild(metaRow);
+          }
+
+          link.appendChild(body);
+          card.appendChild(link);
+          container.appendChild(card);
+        });
+      }catch(err){
+        console.error('Error parsing prime_courses', err);
+        container.innerHTML = '<p>Error cargando cursos guardados.</p>';
+      }
+    }
+
+    window.addEventListener('storage', function(e){
+      if(!e.key || ['prime_courses','prime_courses_progress'].indexOf(e.key)===-1) return;
+      renderCourses();
+    });
+    // Also listen for BroadcastChannel updates (faster/more reliable across same-origin tabs)
+    try{
+      if(typeof BroadcastChannel !== 'undefined'){
+        var __pc_bc = new BroadcastChannel('prime_courses_channel');
+        __pc_bc.addEventListener('message', function(ev){ try{ if(ev && ev.data && ev.data.type === 'updated'){ renderCourses(); } }catch(e){} });
+        window.addEventListener('beforeunload', function(){ try{ __pc_bc.close(); }catch(e){} });
+      } else {
+        window.addEventListener('storage', function(e){ if(e && e.key === '__prime_courses_update_ts'){ try{ renderCourses(); }catch(err){} } });
+      }
+    }catch(e){}
+    // Ensure we render immediately (script is placed at end of body so DOMContentLoaded may have fired)
+    try{ renderCourses(); }catch(e){ console.error('renderCourses immediate call failed', e); }
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Curso — Detalle y compra</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <style>
+    .detail-hero{display:flex;flex-direction:column;gap:18px;margin:18px 0;padding:18px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));}
+    .detail-top{display:flex;gap:18px;align-items:flex-start}
+    .detail-img{flex:0 0 320px;height:220px;border-radius:12px;overflow:hidden;background:#081022}
+    .detail-img img{width:100%;height:100%;object-fit:cover;display:block}
+    .detail-info{flex:1;color:#fff}
+    .detail-title{font-size:1.25rem;margin:0 0 8px}
+    .detail-desc{color:#dfe8f7;margin:0 0 10px;font-size:0.975rem}
+    .buy-row{display:flex;gap:12px;align-items:center}
+    .buy-btn{background:var(--accent);color:#fff;border:0;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;font-size:1rem}
+    .secondary{background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.06);padding:10px 14px;border-radius:8px}
+    .price-big{font-weight:800;font-size:1.25rem;color:#fff}
+    .back-link{display:inline-block;margin-top:6px;color:#fff;text-decoration:none}
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="logo">Prime <span>Cursos</span></h1>
+      <nav><a href="index.html" class="back-link">← Volver</a></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section id="detail" class="detail-hero">
+      <div class="detail-top">
+        <div class="detail-img" id="detailImg"> </div>
+        <div class="detail-info">
+          <h2 id="detailTitle" class="detail-title">Cargando…</h2>
+          <p id="detailDesc" class="detail-desc"></p>
+          <div class="buy-row">
+            <div id="detailPrice" class="price-big"></div>
+            <button id="buyBtn" class="buy-btn">Comprar</button>
+            <button id="previewBtn" class="secondary">Vista previa</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="purchaseModal" class="modal" aria-hidden="true">
+    <div class="modal-content">
+      <button id="closePurchase" class="close">×</button>
+      <h3 id="purchaseTitle">Procesando compra</h3>
+      <p id="purchaseMsg">...</p>
+      <div style="margin-top:12px;text-align:right"><button id="confirmPurchase" class="buy-btn">Confirmar compra (simulada)</button></div>
+    </div>
+  </div>
+
+  <script src="assets/data.js"></script>
+  <script>
+    function qs(name){
+      var m = location.search.match(new RegExp('[?&]'+name+'=([^&]+)'));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+
+    function findCourse(list, id){
+      if(!list || !Array.isArray(list)) return null;
+      return list.find(function(c){
+        var vid = c.id || c.uid || c._id || c.slug || c.title || '';
+        return String(vid) === String(id);
+      }) || null;
+    }
+
+    function loadCourses(){
+      try{
+        var raw = localStorage.getItem('prime_courses');
+        if(raw){ var parsed = JSON.parse(raw); if(Array.isArray(parsed) && parsed.length) return parsed; }
+      }catch(e){}
+      // fallback to server-side JSON if available
+      if(window.coursesData && Array.isArray(window.coursesData) && window.coursesData.length) return window.coursesData;
+      return [];
+    }
+
+    (function(){
+      var id = qs('id');
+      var list = loadCourses();
+      var course = findCourse(list, id);
+      var titleEl = document.getElementById('detailTitle');
+      var descEl = document.getElementById('detailDesc');
+      var imgWrap = document.getElementById('detailImg');
+      var priceEl = document.getElementById('detailPrice');
+
+      if(!course){
+        titleEl.textContent = 'Curso no encontrado';
+        descEl.textContent = 'No se encontró el curso solicitado.';
+        priceEl.textContent = '';
+        return;
+      }
+
+      titleEl.textContent = course.title || course.short_description || '';
+      descEl.textContent = course.description || course.desc || course.short_description || '';
+      var price = (course.price !== undefined && course.price !== null) ? Number(course.price) : null;
+      var dscp = Number(course.discount_pct || 0);
+      if(price !== null && !isNaN(price)){
+        if(dscp > 0){
+          var finalP = price * (1 - (dscp/100));
+          priceEl.innerHTML = '<del style="color:rgba(255,255,255,0.7);margin-right:8px">$' + price.toFixed(2) + '</del><span style="font-weight:800">$' + finalP.toFixed(2) + '</span>';
+        } else {
+          priceEl.textContent = '$' + price.toFixed(2);
+        }
+      } else { priceEl.textContent = ''; }
+
+      imgWrap.innerHTML = '';
+      var imgUrl = course.image || course.img || course.thumbnail || '';
+      if(imgUrl){ var im = document.createElement('img'); im.src = imgUrl; im.alt = course.title || 'Curso'; imgWrap.appendChild(im); }
+
+      // Buy button behaviour: capture email, create Hotmart session and redirect
+      var buyBtn = document.getElementById('buyBtn');
+      var modal = document.getElementById('purchaseModal');
+      var closePurchase = document.getElementById('closePurchase');
+      var purchaseTitle = document.getElementById('purchaseTitle');
+      var purchaseMsg = document.getElementById('purchaseMsg');
+      var confirmPurchase = document.getElementById('confirmPurchase');
+
+      buyBtn.addEventListener('click', function(){
+        var method = prompt("Elige método: 'paypal' para PayPal, 'hotmart' para Hotmart, 'site' para compra directa:", 'paypal');
+        if(!method) return;
+        method = String(method).trim().toLowerCase();
+        if(method === 'hotmart'){
+          var buyerEmail = prompt('Introduce tu email para recibir el acceso (necesario)');
+          if(!buyerEmail){ alert('Se requiere email para continuar'); return; }
+          fetch('hotmart_create_session.php', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ courseId: course.id || course.slug || course.title, email: buyerEmail, price: price })
+          }).then(function(r){ return r.json(); }).then(function(json){ if(!json || !json.ok){ alert('Error al crear sesión: ' + (json && json.error)); return; } window.location.href = json.redirectUrl; }).catch(function(err){ console.error(err); alert('Error creando sesión de pago'); });
+          return;
+        }
+        if(method === 'paypal'){
+          // create PayPal order for this single course
+          var payload = { items: [ { id: course.id, price: price, qty: 1, discount_pct: Number(course.discount_pct || 0), title: course.title } ] };
+          fetch('/prime-cursos/paypal_create_order.php', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) })
+            .then(r=>r.json()).then(function(j){ if(!j || !j.ok){ alert('Error creando orden PayPal'); console.error(j); return; } if(j.redirectUrl) window.location = j.redirectUrl; else alert('No se obtuvo URL de aprobación'); }).catch(function(err){ console.error(err); alert('Error contactando al servidor PayPal'); });
+          return;
+        }
+        if(method === 'site'){
+          // direct site simulated purchase
+          var buyerEmail = prompt('Introduce tu email para recibir el acceso (opcional)');
+          var order = { items: [{id:course.id,title:course.title,price:price,discount_pct:Number(course.discount_pct||0),qty:1}], total: price }; 
+          var orders = JSON.parse(localStorage.getItem('prime_orders')||'[]'); orders.push(order); localStorage.setItem('prime_orders', JSON.stringify(orders));
+          alert('Compra directa completada (simulada).');
+          return;
+        }
+        alert('Método desconocido. Cancelado.');
+      });
+
+      closePurchase.addEventListener('click', function(){ modal.setAttribute('aria-hidden','true'); });
+      confirmPurchase.addEventListener('click', function(){ modal.setAttribute('aria-hidden','true'); alert('Confirmación simulada'); });
+
+      // Preview button: open a simple popup with description (for demo)
+      document.getElementById('previewBtn').addEventListener('click', function(){
+        window.open('', '_blank', 'width=800,height=600').document.write('<h1>'+ (course.title||'') +'</h1><p>'+ (course.description||course.desc||'') +'</p>');
+      });
+
+    })();
+  </script>
+</body>
+</html>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Curso — Prime Cursos</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <header class="site-header"><div class="container"><h1 class="logo">Prime <span>Cursos</span></h1></div></header>
+  <main class="container">
+    <div id="courseDetail"></div>
+  </main>
+  <footer class="site-footer"><div class="container">© Prime Cursos Tec. Pablo Oviedo 2019</div></footer>
+
+  <script src="assets/data.js"></script>
+  <script>
+    function qs(name){ const url=new URL(location.href); return url.searchParams.get(name); }
+    const id = Number(qs('id'));
+    const el = document.getElementById('courseDetail');
+    const c = courses.find(x=>x.id===id);
+    if(!c){ el.innerHTML='<p>Curso no encontrado.</p>'; }
+    else{
+      var priceHtml = '';
+      var base = Number(c.price || 0);
+      var dp = Number(c.discount_pct || 0);
+      if(dp > 0){ var f = base * (1 - (dp/100)); priceHtml = `<strong class="price"><del style="color:rgba(0,0,0,0.6);margin-right:6px">$${base.toFixed(2)}</del> $${f.toFixed(2)}</strong>`; }
+      else { priceHtml = `<strong class="price">$${base.toFixed(2)}</strong>`; }
+
+      el.innerHTML = `
+        <div class="card">
+          <img class="thumb" src="${c.img}" alt="${c.title}">
+          <h2 style="margin-top:12px">${c.title}</h2>
+          <p class="desc">${c.desc}</p>
+          <p><strong>Categoría:</strong> ${c.category} — ${priceHtml}</p>
+          <p><a href="index.html">← Volver al catálogo</a> <button id="buyNow" class="primary">Comprar</button></p>
+        </div>
+      `;
+      document.getElementById('buyNow').addEventListener('click',()=>{
+        let cart = JSON.parse(localStorage.getItem('prime_cart')||'[]');
+        const item = cart.find(x=>x.id===c.id); if(item) item.qty++; else cart.push({id:c.id,title:c.title,price:c.price,qty:1});
+        localStorage.setItem('prime_cart',JSON.stringify(cart)); alert('Añadido al carrito');
+      });
+    }
+  </script>
+</body>
+</html>
